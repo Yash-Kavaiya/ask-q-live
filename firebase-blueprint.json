@@ -1,0 +1,702 @@
+{
+  "entities": {
+    "Series": {
+      "title": "Series",
+      "description": "Multi-speaker event or conference session series",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique series ID",
+          "maxLength": 128
+        },
+        "seriesCode": {
+          "type": "string",
+          "description": "Unambiguous 6-character series code",
+          "maxLength": 32,
+          "pattern": "^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]+$"
+        },
+        "joinCode": {
+          "type": "string",
+          "description": "Join code alias matching seriesCode",
+          "maxLength": 32
+        },
+        "organizerToken": {
+          "type": "string",
+          "description": "Organizer secret administrative key",
+          "maxLength": 128
+        },
+        "creatorUid": {
+          "type": "string",
+          "description": "UID of creator if authenticated",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Event or workshop series title",
+          "maxLength": 200,
+          "minLength": 3
+        },
+        "description": {
+          "type": "string",
+          "description": "Series description",
+          "maxLength": 2000
+        },
+        "contextData": {
+          "type": "string",
+          "description": "Global event grounding context for AI synthesis",
+          "maxLength": 10000
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date (YYYY-MM-DD)",
+          "maxLength": 64
+        },
+        "timezone": {
+          "type": "string",
+          "description": "Timezone string e.g. UTC, America/Los_Angeles",
+          "maxLength": 64
+        },
+        "state": {
+          "type": "string",
+          "description": "Series state",
+          "enum": ["DRAFT", "SCHEDULED", "LIVE", "ENDED", "ARCHIVED"]
+        },
+        "segmentIds": {
+          "type": "array",
+          "description": "Ordered segment IDs"
+        },
+        "liveSegmentId": {
+          "type": "string",
+          "description": "Currently active LIVE segment ID",
+          "maxLength": 128
+        },
+        "settings": {
+          "type": "object",
+          "description": "Series configuration settings"
+        },
+        "revision": {
+          "type": "number",
+          "description": "Monotonically increasing version counter"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO creation timestamp",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO last update timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "seriesCode", "title", "state", "createdAt"]
+    },
+    "Segment": {
+      "title": "Segment",
+      "description": "Individual talk or agenda segment within a series",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique segment ID",
+          "maxLength": 128
+        },
+        "seriesId": {
+          "type": "string",
+          "description": "Parent series ID",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Segment title",
+          "maxLength": 200
+        },
+        "speakerName": {
+          "type": "string",
+          "description": "Speaker display name",
+          "maxLength": 100
+        },
+        "speakerRole": {
+          "type": "string",
+          "description": "Speaker professional title/role",
+          "maxLength": 150
+        },
+        "speakerBio": {
+          "type": "string",
+          "description": "Speaker biography",
+          "maxLength": 1000
+        },
+        "speakerAvatar": {
+          "type": "string",
+          "description": "Avatar photo URL",
+          "maxLength": 500
+        },
+        "type": {
+          "type": "string",
+          "description": "Segment type",
+          "enum": ["TALK", "BREAK", "PANEL", "LOBBY"]
+        },
+        "state": {
+          "type": "string",
+          "description": "Segment lifecycle state",
+          "enum": ["SCHEDULED", "LIVE", "PAUSED", "ENDED", "SKIPPED"]
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Scheduled start time",
+          "maxLength": 64
+        },
+        "scheduledStart": {
+          "type": "string",
+          "description": "ISO scheduled start timestamp",
+          "maxLength": 64
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Duration in minutes"
+        },
+        "actualStart": {
+          "type": "string",
+          "description": "ISO actual start timestamp",
+          "maxLength": 64
+        },
+        "actualEnd": {
+          "type": "string",
+          "description": "ISO actual end timestamp",
+          "maxLength": 64
+        },
+        "groundingContext": {
+          "type": "string",
+          "description": "Speaker-specific grounding material",
+          "maxLength": 10000
+        },
+        "adminToken": {
+          "type": "string",
+          "description": "Speaker secret access token",
+          "maxLength": 128
+        },
+        "order": {
+          "type": "number",
+          "description": "1-based order in run of show"
+        },
+        "graceWindowMinutes": {
+          "type": "number",
+          "description": "Post-talk grace period in minutes"
+        },
+        "categories": {
+          "type": "array",
+          "description": "Segment-specific topic categories"
+        }
+      },
+      "required": ["id", "seriesId", "title", "speakerName", "type", "state", "order"]
+    },
+    "SeriesParticipant": {
+      "title": "SeriesParticipant",
+      "description": "Attendee tracking entry spanning an entire series",
+      "type": "object",
+      "properties": {
+        "clientFingerprint": {
+          "type": "string",
+          "description": "Unique client fingerprint",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Attendee name",
+          "maxLength": 100
+        },
+        "isBanned": {
+          "type": "boolean",
+          "description": "Whether attendee is banned across the series"
+        },
+        "joinedAt": {
+          "type": "string",
+          "description": "ISO joined timestamp",
+          "maxLength": 64
+        },
+        "lastSeenAt": {
+          "type": "string",
+          "description": "ISO last seen timestamp",
+          "maxLength": 64
+        },
+        "questionCount": {
+          "type": "number",
+          "description": "Total inquiries submitted across series"
+        },
+        "segmentsVisited": {
+          "type": "array",
+          "description": "List of segment IDs visited"
+        }
+      },
+      "required": ["clientFingerprint", "name", "isBanned", "joinedAt"]
+    },
+    "AuditEntry": {
+      "title": "AuditEntry",
+      "description": "Audit log record for series lifecycle mutations",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique audit log ID",
+          "maxLength": 128
+        },
+        "seriesId": {
+          "type": "string",
+          "description": "Target series ID",
+          "maxLength": 128
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Associated segment ID if applicable",
+          "maxLength": 128
+        },
+        "actorRole": {
+          "type": "string",
+          "description": "Role of actor who performed action",
+          "maxLength": 64
+        },
+        "actorRef": {
+          "type": "string",
+          "description": "Actor token or identifier",
+          "maxLength": 128
+        },
+        "action": {
+          "type": "string",
+          "description": "Action name e.g. SEGMENT_STARTED",
+          "maxLength": 100
+        },
+        "targetId": {
+          "type": "string",
+          "description": "Target entity ID",
+          "maxLength": 128
+        },
+        "meta": {
+          "type": "object",
+          "description": "Additional context metadata"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO audit timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "seriesId", "actorRole", "action", "createdAt"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Live Q&A presentation interactive room session or backing segment session",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique session ID",
+          "maxLength": 128
+        },
+        "joinCode": {
+          "type": "string",
+          "description": "6-character room access join code",
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9-]+$"
+        },
+        "adminToken": {
+          "type": "string",
+          "description": "Presenter/Host administration secret key",
+          "maxLength": 128
+        },
+        "creatorUid": {
+          "type": "string",
+          "description": "UID of the session host if authenticated",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the live presentation session",
+          "maxLength": 200,
+          "minLength": 3
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional extended context or description of the presentation",
+          "maxLength": 2000
+        },
+        "contextData": {
+          "type": "string",
+          "description": "Grounding knowledge context for Gemini AI responses",
+          "maxLength": 10000
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the session is currently accepting inquiries"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of session creation",
+          "maxLength": 64
+        },
+        "categories": {
+          "type": "array",
+          "description": "Allowed question category labels"
+        },
+        "settings": {
+          "type": "object",
+          "description": "Session moderation and AI generation settings"
+        },
+        "seriesId": {
+          "type": "string",
+          "description": "Parent series ID if this is a segment backing session",
+          "maxLength": 128
+        },
+        "seriesCode": {
+          "type": "string",
+          "description": "Parent series code",
+          "maxLength": 32
+        },
+        "order": {
+          "type": "number",
+          "description": "Segment order"
+        },
+        "segmentType": {
+          "type": "string",
+          "description": "Segment type",
+          "enum": ["TALK", "BREAK", "PANEL", "LOBBY"]
+        },
+        "state": {
+          "type": "string",
+          "description": "Segment state",
+          "enum": ["SCHEDULED", "LIVE", "PAUSED", "ENDED", "SKIPPED"]
+        },
+        "speaker": {
+          "type": "object",
+          "description": "Speaker profile details"
+        },
+        "talkTitle": {
+          "type": "string",
+          "description": "Talk title",
+          "maxLength": 200
+        },
+        "scheduledStart": {
+          "type": "string",
+          "description": "ISO scheduled start timestamp",
+          "maxLength": 64
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Segment duration in minutes"
+        },
+        "actualStart": {
+          "type": "string",
+          "description": "ISO actual start timestamp",
+          "maxLength": 64
+        },
+        "actualEnd": {
+          "type": "string",
+          "description": "ISO actual end timestamp",
+          "maxLength": 64
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Associated segment ID",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "joinCode", "title", "isActive", "createdAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Audience question submitted to a live session or series",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique question identifier",
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Parent session joinCode or ID",
+          "maxLength": 128
+        },
+        "seriesId": {
+          "type": "string",
+          "description": "Parent series ID if submitted within a series",
+          "maxLength": 128
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Target segment ID",
+          "maxLength": 128
+        },
+        "segmentTitle": {
+          "type": "string",
+          "description": "Target segment title",
+          "maxLength": 200
+        },
+        "speakerName": {
+          "type": "string",
+          "description": "Target speaker name",
+          "maxLength": 100
+        },
+        "targetedExplicitly": {
+          "type": "boolean",
+          "description": "Whether author explicitly targeted this segment"
+        },
+        "movedFrom": {
+          "type": "array",
+          "description": "Audit trail of segment transfers"
+        },
+        "isParked": {
+          "type": "boolean",
+          "description": "Whether question is parked for end-of-series panel"
+        },
+        "clientFingerprint": {
+          "type": "string",
+          "description": "Client fingerprint hash or device token",
+          "maxLength": 128
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "Firebase Auth UID if user is signed in",
+          "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of attendee or 'Anonymous'",
+          "maxLength": 100
+        },
+        "isAnonymous": {
+          "type": "boolean",
+          "description": "Whether author opted to remain anonymous on screen"
+        },
+        "content": {
+          "type": "string",
+          "description": "Text body of the audience question",
+          "maxLength": 1000,
+          "minLength": 3
+        },
+        "category": {
+          "type": "string",
+          "description": "Topic category classification",
+          "maxLength": 100
+        },
+        "aiLine1": {
+          "type": "string",
+          "description": "First line of concise AI synthesis",
+          "maxLength": 500
+        },
+        "aiLine2": {
+          "type": "string",
+          "description": "Second line of concise AI synthesis",
+          "maxLength": 500
+        },
+        "aiConfidence": {
+          "type": "number",
+          "description": "AI synthesis confidence score between 0.0 and 1.0"
+        },
+        "aiStatus": {
+          "type": "string",
+          "description": "AI answer generation state",
+          "enum": ["IDLE", "GENERATING", "READY", "FAILED"]
+        },
+        "upvotes": {
+          "type": "number",
+          "description": "Count of audience upvotes"
+        },
+        "isSpam": {
+          "type": "boolean",
+          "description": "Automated spam classification flag"
+        },
+        "spamScore": {
+          "type": "number",
+          "description": "Calculated spam risk score"
+        },
+        "flagReason": {
+          "type": "string",
+          "description": "Automated or presenter moderation rationale",
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "description": "Question moderation status",
+          "enum": ["APPROVED", "PENDING_REVIEW", "REJECTED", "ANSWERING", "ANSWERED"]
+        },
+        "sentimentScore": {
+          "type": "number",
+          "description": "Computed polarity sentiment score between -1.0 and 1.0"
+        },
+        "clusteredWithId": {
+          "type": "string",
+          "description": "Primary parent question ID if clustered",
+          "maxLength": 128
+        },
+        "clusterCount": {
+          "type": "number",
+          "description": "Count of merged duplicate inquiries"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of question submission",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of latest question modification",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "sessionId", "content", "status", "upvotes", "createdAt"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Attendee tracking entry within a session",
+      "type": "object",
+      "properties": {
+        "clientFingerprint": {
+          "type": "string",
+          "description": "Unique client fingerprint or device identifier",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name chosen by attendee",
+          "maxLength": 100
+        },
+        "isBanned": {
+          "type": "boolean",
+          "description": "Whether attendee has been moderated/banned by host"
+        },
+        "joinedAt": {
+          "type": "string",
+          "description": "Timestamp attendee joined the room",
+          "maxLength": 64
+        },
+        "questionCount": {
+          "type": "number",
+          "description": "Total inquiries submitted by this participant"
+        }
+      },
+      "required": ["clientFingerprint", "name", "isBanned", "joinedAt"]
+    },
+    "Upvote": {
+      "title": "Upvote",
+      "description": "Individual audience upvote record to prevent duplicate votes",
+      "type": "object",
+      "properties": {
+        "questionId": {
+          "type": "string",
+          "description": "Target question ID",
+          "maxLength": 128
+        },
+        "clientFingerprint": {
+          "type": "string",
+          "description": "Client fingerprint or user UID",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when upvote occurred",
+          "maxLength": 64
+        }
+      },
+      "required": ["questionId", "clientFingerprint", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public and account user profile",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 255
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar photo URL",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "description": "User role: presenter, attendee, or admin",
+          "enum": ["presenter", "attendee", "admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account registration timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["uid", "displayName", "email", "createdAt"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "System healthcheck probe document for Firestore validation",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "Health status indicator",
+          "maxLength": 32
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Probe check timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["status"]
+    }
+  },
+  "firestore": {
+    "/series/{seriesId}": {
+      "schema": "Series",
+      "description": "Collection of multi-speaker conference and workshop series"
+    },
+    "/series/{seriesId}/segments/{segmentId}": {
+      "schema": "Segment",
+      "description": "Sub-collection of individual presentation segments in a series"
+    },
+    "/series/{seriesId}/participants/{participantId}": {
+      "schema": "SeriesParticipant",
+      "description": "Sub-collection of series-wide attendees"
+    },
+    "/series/{seriesId}/audit/{auditId}": {
+      "schema": "AuditEntry",
+      "description": "Sub-collection of audit log entries for a series"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Collection of live Q&A interactive presentation rooms"
+    },
+    "/sessions/{sessionId}/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Sub-collection of audience inquiries belonging to a session"
+    },
+    "/sessions/{sessionId}/participants/{participantId}": {
+      "schema": "Participant",
+      "description": "Sub-collection of attendees and participants in a session"
+    },
+    "/sessions/{sessionId}/upvotes/{upvoteId}": {
+      "schema": "Upvote",
+      "description": "Sub-collection recording upvotes for questions to prevent duplication"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User account profiles"
+    },
+    "/test/{testId}": {
+      "schema": "TestConnection",
+      "description": "Connection probe verification collection"
+    }
+  }
+}

@@ -1,0 +1,277 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all unmapped paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidJoinCode(code) {
+      return code is string && code.size() >= 3 && code.size() <= 32 && code.matches('^[A-Z0-9_\\-]+$');
+    }
+
+    // Validation Blueprint for Series
+    function isValidSeries(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.seriesCode is string && isValidJoinCode(data.seriesCode) &&
+        data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
+        data.state is string && data.state in ['DRAFT', 'SCHEDULED', 'LIVE', 'ENDED', 'ARCHIVED'] &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        (!('contextData' in data) || (data.contextData is string && data.contextData.size() <= 10000)) &&
+        (!('organizerToken' in data) || (data.organizerToken is string && data.organizerToken.size() <= 128)) &&
+        (!('creatorUid' in data) || (data.creatorUid is string && data.creatorUid.size() <= 128)) &&
+        (!('segmentIds' in data) || (data.segmentIds is list)) &&
+        (!('liveSegmentId' in data) || (data.liveSegmentId is string && data.liveSegmentId.size() <= 128)) &&
+        (!('settings' in data) || (data.settings is map)) &&
+        (!('revision' in data) || (data.revision is number)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Validation Blueprint for Segment
+    function isValidSegment(data, seriesId) {
+      return data.id is string && isValidId(data.id) &&
+        data.seriesId is string && (data.seriesId == seriesId || isValidId(data.seriesId)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.speakerName is string && data.speakerName.size() >= 1 && data.speakerName.size() <= 100 &&
+        data.type is string && data.type in ['TALK', 'BREAK', 'PANEL', 'LOBBY'] &&
+        data.state is string && data.state in ['SCHEDULED', 'LIVE', 'PAUSED', 'ENDED', 'SKIPPED'] &&
+        data.order is number &&
+        (!('durationMinutes' in data) || (data.durationMinutes is number)) &&
+        (!('groundingContext' in data) || (data.groundingContext is string && data.groundingContext.size() <= 10000)) &&
+        (!('adminToken' in data) || (data.adminToken is string && data.adminToken.size() <= 128)) &&
+        (!('graceWindowMinutes' in data) || (data.graceWindowMinutes is number)) &&
+        (!('categories' in data) || (data.categories is list));
+    }
+
+    // Validation Blueprint for Series Participant
+    function isValidSeriesParticipant(data) {
+      return data.clientFingerprint is string && isValidId(data.clientFingerprint) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.isBanned is bool &&
+        data.joinedAt is string && data.joinedAt.size() <= 64 &&
+        (!('questionCount' in data) || (data.questionCount is number)) &&
+        (!('segmentsVisited' in data) || (data.segmentsVisited is list));
+    }
+
+    // Validation Blueprint for Audit Entry
+    function isValidAuditEntry(data, seriesId) {
+      return data.id is string && isValidId(data.id) &&
+        data.seriesId is string && (data.seriesId == seriesId || isValidId(data.seriesId)) &&
+        data.actorRole is string && data.actorRole.size() <= 64 &&
+        data.action is string && data.action.size() <= 100 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('segmentId' in data) || (data.segmentId is string && data.segmentId.size() <= 128)) &&
+        (!('targetId' in data) || (data.targetId is string && data.targetId.size() <= 128)) &&
+        (!('meta' in data) || (data.meta is map));
+    }
+
+    // Validation Blueprint for Session
+    function isValidSession(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.joinCode is string && isValidJoinCode(data.joinCode) &&
+        data.title is string && data.title.size() >= 3 && data.title.size() <= 200 &&
+        data.isActive is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        (!('contextData' in data) || (data.contextData is string && data.contextData.size() <= 10000)) &&
+        (!('adminToken' in data) || (data.adminToken is string && data.adminToken.size() <= 128)) &&
+        (!('creatorUid' in data) || (data.creatorUid is string && data.creatorUid.size() <= 128)) &&
+        (!('categories' in data) || (data.categories is list && data.categories.size() <= 20)) &&
+        (!('settings' in data) || (data.settings is map)) &&
+        (!('seriesId' in data) || (data.seriesId is string && data.seriesId.size() <= 128)) &&
+        (!('seriesCode' in data) || (data.seriesCode is string && data.seriesCode.size() <= 32)) &&
+        (!('order' in data) || (data.order is number)) &&
+        (!('segmentId' in data) || (data.segmentId is string && data.segmentId.size() <= 128));
+    }
+
+    // Validation Blueprint for Question
+    function isValidQuestion(data, sessionId) {
+      return data.id is string && isValidId(data.id) &&
+        data.sessionId is string && (data.sessionId == sessionId || isValidId(data.sessionId)) &&
+        data.content is string && data.content.size() >= 1 && data.content.size() <= 1000 &&
+        data.status is string && data.status in ['APPROVED', 'PENDING_REVIEW', 'REJECTED', 'ANSWERING', 'ANSWERED'] &&
+        data.upvotes is number && data.upvotes >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('seriesId' in data) || (data.seriesId is string && data.seriesId.size() <= 128)) &&
+        (!('segmentId' in data) || (data.segmentId is string && data.segmentId.size() <= 128)) &&
+        (!('segmentTitle' in data) || (data.segmentTitle is string && data.segmentTitle.size() <= 200)) &&
+        (!('speakerName' in data) || (data.speakerName is string && data.speakerName.size() <= 100)) &&
+        (!('targetedExplicitly' in data) || (data.targetedExplicitly is bool)) &&
+        (!('movedFrom' in data) || (data.movedFrom is list)) &&
+        (!('isParked' in data) || (data.isParked is bool)) &&
+        (!('clientFingerprint' in data) || (data.clientFingerprint is string && data.clientFingerprint.size() <= 128)) &&
+        (!('authorUid' in data) || (data.authorUid is string && data.authorUid.size() <= 128)) &&
+        (!('authorName' in data) || (data.authorName is string && data.authorName.size() <= 100)) &&
+        (!('isAnonymous' in data) || (data.isAnonymous is bool)) &&
+        (!('category' in data) || (data.category is string && data.category.size() <= 100)) &&
+        (!('aiLine1' in data) || (data.aiLine1 is string && data.aiLine1.size() <= 500)) &&
+        (!('aiLine2' in data) || (data.aiLine2 is string && data.aiLine2.size() <= 500)) &&
+        (!('aiConfidence' in data) || (data.aiConfidence is number)) &&
+        (!('aiStatus' in data) || (data.aiStatus is string && data.aiStatus in ['IDLE', 'GENERATING', 'READY', 'FAILED'])) &&
+        (!('isSpam' in data) || (data.isSpam is bool)) &&
+        (!('spamScore' in data) || (data.spamScore is number)) &&
+        (!('flagReason' in data) || (data.flagReason is string && data.flagReason.size() <= 500)) &&
+        (!('sentimentScore' in data) || (data.sentimentScore is number)) &&
+        (!('clusteredWithId' in data) || (data.clusteredWithId is string && data.clusteredWithId.size() <= 128)) &&
+        (!('clusterCount' in data) || (data.clusterCount is number)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Validation Blueprint for Participant
+    function isValidParticipant(data) {
+      return data.clientFingerprint is string && isValidId(data.clientFingerprint) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.isBanned is bool &&
+        data.joinedAt is string && data.joinedAt.size() <= 64 &&
+        (!('questionCount' in data) || (data.questionCount is number));
+    }
+
+    // Validation Blueprint for Upvote
+    function isValidUpvote(data) {
+      return data.questionId is string && isValidId(data.questionId) &&
+        data.clientFingerprint is string && isValidId(data.clientFingerprint) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // Validation Blueprint for User Profile
+    function isValidUserProfile(data, uid) {
+      return data.uid == uid &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.email is string && data.email.size() <= 255 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500)) &&
+        (!('role' in data) || (data.role is string && data.role in ['presenter', 'attendee', 'admin']));
+    }
+
+    // Test healthcheck probe
+    match /test/{testId} {
+      allow get: if isValidId(testId);
+      allow list, write: if false;
+    }
+
+    // User accounts
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isSignedIn());
+      allow list: if false;
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUserProfile(incoming(), userId);
+      allow update: if isValidId(userId) && isOwner(userId) && isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid && incoming().createdAt == existing().createdAt;
+      allow delete: if false;
+    }
+
+    // Series (Multi-speaker events)
+    match /series/{seriesId} {
+      allow get: if isValidId(seriesId);
+      allow list: if true;
+      allow create: if isValidId(seriesId) && isValidSeries(incoming());
+      allow update: if isValidId(seriesId) && isValidSeries(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().seriesCode == existing().seriesCode;
+      allow delete: if isValidId(seriesId) && (isSignedIn() && (resource.data.creatorUid == request.auth.uid));
+
+      // Segments sub-collection
+      match /segments/{segmentId} {
+        allow get, list: if isValidId(seriesId);
+        allow create: if isValidId(seriesId) && isValidId(segmentId) && isValidSegment(incoming(), seriesId);
+        allow update: if isValidId(seriesId) && isValidId(segmentId) && isValidSegment(incoming(), seriesId);
+        allow delete: if isValidId(seriesId) && isValidId(segmentId);
+      }
+
+      // Series Participants sub-collection
+      match /participants/{participantId} {
+        allow get, list: if isValidId(seriesId);
+        allow create: if isValidId(seriesId) && isValidId(participantId) && isValidSeriesParticipant(incoming());
+        allow update: if isValidId(seriesId) && isValidId(participantId) && isValidSeriesParticipant(incoming());
+        allow delete: if false;
+      }
+
+      // Audit logs
+      match /audit/{auditId} {
+        allow get, list: if isValidId(seriesId);
+        allow create: if isValidId(seriesId) && isValidId(auditId) && isValidAuditEntry(incoming(), seriesId);
+        allow update, delete: if false;
+      }
+    }
+
+    // Sessions and live interactive rooms
+    match /sessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if true;
+      allow create: if isValidId(sessionId) && isValidSession(incoming());
+      allow update: if isValidId(sessionId) && isValidSession(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().joinCode == existing().joinCode;
+      allow delete: if isValidId(sessionId) && (isSignedIn() && (resource.data.creatorUid == request.auth.uid));
+
+      // Questions sub-collection
+      match /questions/{questionId} {
+        allow get, list: if isValidId(sessionId);
+        allow create: if isValidId(sessionId) && isValidId(questionId) && isValidQuestion(incoming(), sessionId);
+        allow update: if isValidId(sessionId) && isValidId(questionId) && isValidQuestion(incoming(), sessionId) &&
+          incoming().id == existing().id &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().createdAt == existing().createdAt &&
+          (
+            // Action 1: Upvote toggle
+            incoming().diff(existing()).affectedKeys().hasOnly(['upvotes', 'updatedAt']) ||
+            // Action 2: Presenter moderation & status change
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'flagReason']) ||
+            // Action 3: AI two-line answer generation
+            incoming().diff(existing()).affectedKeys().hasOnly(['aiLine1', 'aiLine2', 'aiConfidence', 'aiStatus', 'updatedAt']) ||
+            // Action 4: Deduplication clustering
+            incoming().diff(existing()).affectedKeys().hasOnly(['clusteredWithId', 'clusterCount', 'upvotes', 'updatedAt']) ||
+            // Action 5: Author content edit
+            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'updatedAt']) ||
+            // Action 6: Sentiment & Spam updates
+            incoming().diff(existing()).affectedKeys().hasOnly(['sentimentScore', 'isSpam', 'spamScore', 'flagReason', 'status', 'updatedAt']) ||
+            // Action 7: Move segment / park
+            incoming().diff(existing()).affectedKeys().hasOnly(['segmentId', 'segmentTitle', 'speakerName', 'movedFrom', 'isParked', 'updatedAt'])
+          );
+        allow delete: if isValidId(sessionId) && isValidId(questionId);
+      }
+
+      // Participants sub-collection
+      match /participants/{participantId} {
+        allow get, list: if isValidId(sessionId);
+        allow create: if isValidId(sessionId) && isValidId(participantId) && isValidParticipant(incoming());
+        allow update: if isValidId(sessionId) && isValidId(participantId) && isValidParticipant(incoming()) &&
+          incoming().clientFingerprint == existing().clientFingerprint &&
+          incoming().joinedAt == existing().joinedAt;
+        allow delete: if false;
+      }
+
+      // Upvotes tracking sub-collection
+      match /upvotes/{upvoteId} {
+        allow get, list: if isValidId(sessionId);
+        allow create: if isValidId(sessionId) && isValidId(upvoteId) && isValidUpvote(incoming());
+        allow delete: if isValidId(sessionId) && isValidId(upvoteId);
+      }
+    }
+  }
+}

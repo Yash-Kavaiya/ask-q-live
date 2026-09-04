@@ -1,0 +1,185 @@
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons|Material+Icons+Outlined|Material+Icons+Round');
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --md-primary: #1A73E8;
+    --md-on-primary: #FFFFFF;
+    --md-primary-container: #D2E3FC;
+    --md-on-primary-container: #0842A0;
+    --md-surface: #FFFFFF;
+    --md-surface-variant: #F1F3F4;
+    --md-outline: #747775;
+    --md-outline-variant: #E0E2EC;
+    --md-error: #D93025;
+    --md-success: #1E8E3E;
+    --md-warning: #F9AB00;
+  }
+
+  body {
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Google Sans', 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Roboto Mono', monospace;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #DADCE0;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #BDC1C6;
+}
+
+/* Pulse indicator */
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.15);
+  }
+}
+
+.animate-live-dot {
+  animation: live-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Sound wave bars animation */
+@keyframes sound-wave-1 {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+@keyframes sound-wave-2 {
+  0%, 100% { height: 16px; }
+  50% { height: 6px; }
+}
+@keyframes sound-wave-3 {
+  0%, 100% { height: 8px; }
+  50% { height: 18px; }
+}
+
+.sound-bar-1 { animation: sound-wave-1 0.8s ease-in-out infinite; }
+.sound-bar-2 { animation: sound-wave-2 0.7s ease-in-out infinite; }
+.sound-bar-3 { animation: sound-wave-3 0.9s ease-in-out infinite; }
+
+/* Word Cloud Dynamic Transitions & Frequency Surge Animations */
+@keyframes word-cloud-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  65% {
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes word-surge-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  60% {
+    transform: scale(1.22);
+    opacity: 0.15;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes float-surge-badge {
+  0% {
+    opacity: 0;
+    transform: translateY(2px) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.05);
+  }
+  75% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.85);
+  }
+}
+
+@keyframes frequency-bar-grow {
+  0% {
+    transform: scaleX(0.2);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.word-node-transition {
+  transition: transform 0.75s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.45s ease-out;
+  transform-origin: center center;
+}
+
+.word-rect-transition {
+  transition: x 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              y 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              width 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              height 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              rx 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              ry 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              fill 0.4s ease,
+              stroke 0.4s ease;
+}
+
+.word-text-transition {
+  transition: font-size 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              fill 0.4s ease,
+              transform 0.2s ease;
+}
+
+.word-circle-transition {
+  transition: r 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              cx 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              cy 0.65s cubic-bezier(0.34, 1.25, 0.64, 1),
+              fill 0.4s ease,
+              stroke 0.4s ease;
+}
+
+.animate-word-enter {
+  animation: word-cloud-enter 0.6s cubic-bezier(0.34, 1.5, 0.64, 1) forwards;
+}
+
+.animate-surge-ripple {
+  animation: word-surge-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  transform-origin: center center;
+}
+
+.animate-float-badge {
+  animation: float-surge-badge 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  transform-origin: center center;
+}
+
