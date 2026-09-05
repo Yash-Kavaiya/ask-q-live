@@ -435,7 +435,7 @@ import { Segment } from '../models/qa.models';
                     id="input-seg-speaker-name"
                     type="text"
                     formControlName="speakerName"
-                    placeholder="e.g. Dr. Sundar Varma"
+                    placeholder="e.g. Jane Doe"
                     class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                   />
                 </div>

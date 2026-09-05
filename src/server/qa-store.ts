@@ -138,7 +138,7 @@ export class QaStore {
 
   public getActiveLiveRoom(): { series?: Series; session?: Session } | null {
     const allSeries = Array.from(this.series.values());
-    const liveSeries = allSeries.find(s => s.state === 'LIVE') || this.series.get('NEXT26') || allSeries[0];
+    const liveSeries = allSeries.find(s => s.state === 'LIVE') || allSeries[0];
     if (liveSeries) {
       return { series: liveSeries };
     }
@@ -217,8 +217,8 @@ export class QaStore {
       adminToken: organizerToken,
       graceWindowMinutes: 60,
       categories: ['General', 'Logistics', 'Feedback', 'Sponsors'],
-      groundingContext: params.contextData || params.seriesContextData || 'General workshop inquiries and event logistics.',
-      contextData: params.contextData || params.seriesContextData || 'General workshop inquiries and event logistics.',
+      groundingContext: params.contextData || params.seriesContextData || '',
+      contextData: params.contextData || params.seriesContextData || '',
     };
 
     const segments: Segment[] = [generalSegment];
@@ -1178,15 +1178,22 @@ export class QaStore {
       // Compose grounding: Event grounding + Speaker grounding + Speaker Identity (FR-E1)
       const eventContext = series?.contextData || series?.seriesContextData || '';
       const speakerContext = targetSegment?.groundingContext || targetSegment?.contextData || session?.contextData || '';
-      const speakerHeader = targetSegment?.speakerName ? `Speaker: ${targetSegment.speakerName} (${targetSegment.title})` : '';
+      const sessionTitle = targetSegment?.title || session?.title || series?.title || '';
+      const sessionHeader = sessionTitle ? `Session Title: ${sessionTitle}` : '';
+      const speakerHeader = targetSegment?.speakerName
+        ? `Speaker: ${targetSegment.speakerName}${targetSegment.speakerRole ? ` (${targetSegment.speakerRole})` : ''}`
+        : (session?.speakerName ? `Speaker: ${session.speakerName}` : '');
 
-      const mergedGrounding = [speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
+      const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
       generateTwoLineAnswer(newQuestion.content, mergedGrounding)
         .then(aiResult => {
           newQuestion.aiLine1 = aiResult.firstLine;
           newQuestion.aiLine2 = aiResult.secondLine;
           newQuestion.aiConfidence = aiResult.confidenceScore;
+          newQuestion.isGroundedOnDeck = aiResult.isGroundedOnDeck;
+          newQuestion.ragModel = aiResult.ragModel;
+          newQuestion.topSimilarity = aiResult.topSimilarity;
           newQuestion.aiStatus = 'READY';
           newQuestion.updatedAt = new Date().toISOString();
         })
@@ -1634,7 +1641,7 @@ export class QaStore {
       approvedQuestions: approved,
       flaggedQuestions: flagged,
       answeredQuestions: answered,
-      activeParticipants: Math.max(1, (this.participants.get(joinCode.toUpperCase())?.size || 18) + Math.floor(questions.length * 1.5)),
+      activeParticipants: this.participants.get(joinCode.toUpperCase())?.size || 0,
     };
   }
 
@@ -1647,7 +1654,7 @@ export class QaStore {
     const totalUpvotes = allQuestions.reduce((acc, q) => acc + q.upvotes, 0);
     const answeredCount = allQuestions.filter(q => q.status === 'ANSWERED').length;
     const answeredRate = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
-    const uniqueParticipants = Math.max(20, (this.seriesParticipants.get(code)?.size || 18) + Math.floor(totalQuestions * 1.5));
+    const uniqueParticipants = this.seriesParticipants.get(code)?.size || 0;
 
     // Timeline buckets (5-minute buckets)
     const timelineMap = new Map<string, { questions: number; upvotes: number; segmentId?: string }>();
@@ -1725,10 +1732,10 @@ export class QaStore {
     });
 
     // Attendance curve
-    const attendanceCurve = (series?.segments || []).map((seg, idx) => ({
+    const attendanceCurve = (series?.segments || []).map(seg => ({
       segmentId: seg.id,
       segmentTitle: seg.title,
-      activeParticipants: Math.max(12, uniqueParticipants - (idx * 3)),
+      activeParticipants: uniqueParticipants,
     }));
 
     return {
@@ -1917,7 +1924,7 @@ export class QaStore {
       generatedAt: new Date().toISOString(),
       totalQuestions: allQuestions.length,
       totalUpvotes: allQuestions.reduce((sum, q) => sum + q.upvotes, 0),
-      totalParticipants: Math.max(20, (this.seriesParticipants.get(code)?.size || 18) + Math.floor(allQuestions.length * 1.5)),
+      totalParticipants: this.seriesParticipants.get(code)?.size || 0,
       executiveSummary: report.executiveSummary,
       segmentReports,
       speakerComparisons,
@@ -3073,14 +3080,21 @@ export class QaStore {
     q.aiStatus = 'GENERATING';
     const eventContext = series?.contextData || series?.seriesContextData || '';
     const speakerContext = targetSegment?.groundingContext || targetSegment?.contextData || session?.contextData || '';
-    const speakerHeader = targetSegment?.speakerName ? `Speaker: ${targetSegment.speakerName} (${targetSegment.title})` : '';
-    const mergedGrounding = [speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
+    const sessionTitle = targetSegment?.title || session?.title || series?.title || '';
+    const sessionHeader = sessionTitle ? `Session Title: ${sessionTitle}` : '';
+    const speakerHeader = targetSegment?.speakerName
+      ? `Speaker: ${targetSegment.speakerName}${targetSegment.speakerRole ? ` (${targetSegment.speakerRole})` : ''}`
+      : (session?.speakerName ? `Speaker: ${session.speakerName}` : '');
+    const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
     try {
       const aiResult = await generateTwoLineAnswer(q.content, mergedGrounding);
       q.aiLine1 = aiResult.firstLine;
       q.aiLine2 = aiResult.secondLine;
       q.aiConfidence = aiResult.confidenceScore;
+      q.isGroundedOnDeck = aiResult.isGroundedOnDeck;
+      q.ragModel = aiResult.ragModel;
+      q.topSimilarity = aiResult.topSimilarity;
       q.aiStatus = 'READY';
       q.updatedAt = new Date().toISOString();
       return q;
@@ -3092,12 +3106,15 @@ export class QaStore {
   }
 }
 
-function newQuestionLine(q: Question, aiResult: { firstLine: string; secondLine: string; confidenceScore: number }) {
+function newQuestionLine(q: Question, aiResult: { firstLine: string; secondLine: string; confidenceScore: number; isGroundedOnDeck?: boolean; ragModel?: string; topSimilarity?: number }) {
   q.aiLine1 = aiResult.firstLine;
   q.aiLine2 = aiResult.secondLine;
   q.aiConfidence = aiResult.confidenceScore;
+  q.isGroundedOnDeck = aiResult.isGroundedOnDeck ?? false;
+  q.ragModel = aiResult.ragModel;
+  q.topSimilarity = aiResult.topSimilarity;
   q.aiStatus = 'READY';
   q.updatedAt = new Date().toISOString();
 }
 
-export const qaStore = new QaStore(true);
+export const qaStore = new QaStore(false);

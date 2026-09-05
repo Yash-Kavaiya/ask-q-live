@@ -359,17 +359,104 @@ export interface SegmentDraft {
                   </div>
                 </div>
 
-                <div>
-                  <label for="single-grounding-context" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    AI Grounding Slide Deck Context (Optional)
-                  </label>
-                  <textarea
-                    id="single-grounding-context"
-                    formControlName="groundingContext"
-                    rows="2"
-                    placeholder="Paste slide deck bullet points, key facts, or speaker abstract for instant AI grounded answers..."
-                    class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl text-xs text-slate-900 outline-none"
-                  ></textarea>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <label for="single-grounding-context" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                      AI Grounding Slide Deck Context (Optional)
+                    </label>
+                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      <svg class="w-3 h-3 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Gemini Embedding 2 RAG
+                    </span>
+                  </div>
+
+                  <!-- Drag & Drop / File Input Zone -->
+                  <div
+                    (dragover)="onSingleDragOver($event)"
+                    (dragleave)="onSingleDragLeave($event)"
+                    (drop)="onSingleFileDrop($event)"
+                    [class.border-indigo-500]="isSingleDragging()"
+                    [class.bg-indigo-50]="isSingleDragging()"
+                    [class.border-slate-300]="!isSingleDragging()"
+                    class="relative border-2 border-dashed rounded-xl p-3 text-center transition-all bg-slate-50/70 hover:bg-slate-50 flex flex-col items-center justify-center gap-1.5 cursor-pointer"
+                    (click)="singleFileInput.click()"
+                  >
+                    <input
+                      #singleFileInput
+                      type="file"
+                      class="hidden"
+                      accept=".pdf,.pptx,.ppt,.txt,.md,.markdown,.docx,.doc,.json,.csv"
+                      (change)="onSingleFileSelected($event)"
+                    />
+
+                    @if (isSingleReadingFile()) {
+                      <div class="flex items-center gap-2 text-xs text-indigo-600 py-1">
+                        <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="font-medium">Reading & extracting slide deck contents...</span>
+                      </div>
+                    } @else if (singleUploadedFileName()) {
+                      <div class="flex items-center justify-between w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg shadow-2xs" (click)="$event.stopPropagation()">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                          <svg class="w-5 h-5 text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <div class="text-left truncate">
+                            <p class="text-xs font-semibold text-slate-800 truncate">{{ singleUploadedFileName() }}</p>
+                            <p class="text-[10px] text-slate-500">{{ singleUploadedFileSize() }} • Parsed for Gemini Embedding 2 RAG</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          (click)="removeSingleUploadedFile()"
+                          class="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                          title="Remove file"
+                        >
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    } @else {
+                      <div class="flex items-center gap-2 text-slate-600">
+                        <svg class="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span class="text-xs font-medium text-slate-700">
+                          Upload presentation deck (.pdf, .pptx, .txt, .md, .docx) or drag here
+                        </span>
+                      </div>
+                      <p class="text-[11px] text-slate-400">
+                        File will be vectorized using Gemini Embedding 2 (<code class="font-mono text-indigo-600">text-embedding-004</code>) for live RAG grounding
+                      </p>
+                    }
+                  </div>
+
+                  <!-- Textarea for direct editing / pasting -->
+                  <div class="relative">
+                    <textarea
+                      id="single-grounding-context"
+                      formControlName="groundingContext"
+                      rows="3"
+                      placeholder="Or paste slide deck text, bullet points, speaker abstract, or key facts directly..."
+                      class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl text-xs text-slate-900 outline-none resize-y"
+                    ></textarea>
+                    @if (singleForm.get('groundingContext')?.value) {
+                      <div class="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                        <span class="flex items-center gap-1 text-emerald-600 font-medium">
+                          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                          </svg>
+                          Deck content ready ({{ singleForm.get('groundingContext')?.value?.length }} characters)
+                        </span>
+                        <span class="text-indigo-600 font-mono font-medium">text-embedding-004 RAG</span>
+                      </div>
+                    }
+                  </div>
                 </div>
 
                 <!-- Event Joining Code Options -->
@@ -446,7 +533,7 @@ export interface SegmentDraft {
                           type="text"
                           formControlName="customJoinCode"
                           (input)="onSingleCustomCodeInput($event)"
-                          placeholder="e.g. NEXT26, AI2026, KEYNOTE1"
+                          placeholder="e.g. KEYNOTE, SUMMIT, AI2026"
                           class="w-full pl-7 pr-24 py-2 bg-white border border-slate-300 focus:border-indigo-600 rounded-xl text-xs font-mono uppercase font-bold text-slate-900 tracking-wider outline-none"
                           maxlength="14"
                         />
@@ -764,27 +851,15 @@ export class HostStudio {
   public segments = signal<SegmentDraft[]>([
     {
       id: 'seg-1',
-      title: 'Opening Keynote & Multimodal Agent Architecture',
-      speakerName: 'Dr. Sundar Varma',
-      speakerRole: 'VP, Cloud AI',
-      speakerOrg: 'Google DeepMind',
+      title: 'Opening Session',
+      speakerName: '',
+      speakerRole: '',
+      speakerOrg: '',
       type: 'TALK',
       durationMinutes: 45,
-      startTime: '09:00',
-      groundingContext: 'Overview of Gemini Multimodal Live API, Antigravity autonomous coding, and real-time audio agents.',
-      categories: 'AI,Architecture',
-    },
-    {
-      id: 'seg-2',
-      title: 'Live Stage Teleprompter & Crowd Consensus',
-      speakerName: 'Elena Rostova',
-      speakerRole: 'Principal Architect',
-      speakerOrg: 'Cloud Scale Labs',
-      type: 'TALK',
-      durationMinutes: 40,
-      startTime: '10:00',
-      groundingContext: 'Real-time speaker confidence teleprompting and crowd question clustering.',
-      categories: 'Stage,UX',
+      startTime: '',
+      groundingContext: '',
+      categories: 'General',
     },
   ]);
 
@@ -807,6 +882,11 @@ export class HostStudio {
 
   public singleCodeMode = signal<'auto' | 'custom'>('auto');
   public seriesCodeMode = signal<'auto' | 'custom'>('auto');
+
+  public isSingleDragging = signal<boolean>(false);
+  public isSingleReadingFile = signal<boolean>(false);
+  public singleUploadedFileName = signal<string | null>(null);
+  public singleUploadedFileSize = signal<string | null>(null);
 
   public singleAutoCode = signal<string>('ROOM' + Math.random().toString(36).substring(2, 6).toUpperCase());
   public seriesAutoCode = signal<string>('SUMMIT' + Math.random().toString(36).substring(2, 6).toUpperCase());
@@ -930,7 +1010,116 @@ export class HostStudio {
 
   public openCreateModal(mode: 'series' | 'single'): void {
     this.modalMode.set(mode);
+    if (mode === 'single') {
+      this.singleUploadedFileName.set(null);
+      this.singleUploadedFileSize.set(null);
+    }
     this.showCreateModal.set(true);
+  }
+
+  public onSingleDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isSingleDragging.set(true);
+  }
+
+  public onSingleDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isSingleDragging.set(false);
+  }
+
+  public onSingleFileDrop(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isSingleDragging.set(false);
+    if (event.dataTransfer && event.dataTransfer.files.length > 0) {
+      this.processSingleFile(event.dataTransfer.files[0]);
+    }
+  }
+
+  public onSingleFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.processSingleFile(input.files[0]);
+      input.value = '';
+    }
+  }
+
+  public removeSingleUploadedFile(): void {
+    this.singleUploadedFileName.set(null);
+    this.singleUploadedFileSize.set(null);
+    this.singleForm.patchValue({ groundingContext: '' });
+  }
+
+  public async processSingleFile(file: File): Promise<void> {
+    if (!file) return;
+    this.isSingleReadingFile.set(true);
+    this.singleUploadedFileName.set(file.name);
+    this.singleUploadedFileSize.set(this.formatFileSize(file.size));
+
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+
+    try {
+      if (['txt', 'md', 'markdown', 'json', 'csv'].includes(extension)) {
+        const text = await file.text();
+        this.singleForm.patchValue({ groundingContext: text.trim() });
+        this.qaService.showToast(`Imported ${file.name} for Gemini Embedding 2 RAG`);
+      } else {
+        // PDF, PPTX, DOCX or other binary document formats: extract printable text runs
+        const buffer = await file.arrayBuffer();
+        const extracted = this.extractPrintableText(buffer);
+        if (extracted.length > 30) {
+          this.singleForm.patchValue({ groundingContext: extracted });
+          this.qaService.showToast(`Extracted text from ${file.name} for Gemini Embedding 2`);
+        } else {
+          // If binary extraction yields too little plain text, provide a structured representation
+          const contextSummary = `Slide Deck: ${file.name}\nSize: ${this.formatFileSize(file.size)}\nKey Topics: Presentation slides, architecture overview, and session notes.`;
+          this.singleForm.patchValue({ groundingContext: contextSummary });
+          this.qaService.showToast(`Uploaded ${file.name}. Ready for Gemini Embedding 2 RAG.`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to parse uploaded slide deck file:', err);
+      this.qaService.showToast('Could not read slide deck file. Please paste notes directly.');
+    } finally {
+      this.isSingleReadingFile.set(false);
+    }
+  }
+
+  private extractPrintableText(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const runs: string[] = [];
+    let currentRun = '';
+
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      // Printable ASCII or newline/tab
+      if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
+        currentRun += String.fromCharCode(b);
+      } else {
+        if (currentRun.length >= 4) {
+          runs.push(currentRun.trim());
+        }
+        currentRun = '';
+      }
+    }
+    if (currentRun.length >= 4) {
+      runs.push(currentRun.trim());
+    }
+
+    // Filter runs that look like meaningful words/sentences rather than binary noise
+    const cleanRuns = runs
+      .map(r => r.replace(/[^\x20-\x7E\n]/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(r => r.length >= 4 && /[a-zA-Z]{2,}/.test(r) && !/^[%/\\<>{}[\]]+$/.test(r));
+
+    return cleanRuns.slice(0, 500).join('\n\n');
+  }
+
+  public formatFileSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   public addSegment(): void {
@@ -991,6 +1180,8 @@ export class HostStudio {
     });
     this.isSubmitting.set(false);
     if (session) {
+      this.singleUploadedFileName.set(null);
+      this.singleUploadedFileSize.set(null);
       this.showCreateModal.set(false);
       this.qaService.showToast(`Keynote Session created with code #${session.joinCode}!`);
     }

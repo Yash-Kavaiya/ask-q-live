@@ -302,8 +302,8 @@ export class ReportExporterService {
           const aiY = y + 26 + contentLines.length * 12 + 2;
           doc.setFontSize(8);
           doc.setFont('helvetica', 'italic');
-          doc.setTextColor(26, 115, 232);
-          const aiText = doc.splitTextToSize(`AI Synthesis: "${q.aiLine1} ${q.aiLine2 || ''}"`, contentWidth - 28);
+          const aiPrefix = q.isGroundedOnDeck ? 'AI (Deck Grounded)' : 'AI (Generic)';
+          const aiText = doc.splitTextToSize(`${aiPrefix}: "${q.aiLine1} ${q.aiLine2 || ''}"`, contentWidth - 28);
           doc.text(aiText, margin + 10, aiY);
         }
 

@@ -878,7 +878,7 @@ app.get('/api/live-room', (req, res) => {
         activeSpeakerRole: activeSeg?.speakerRole || 'Presenter',
         activeTalk: activeSeg?.title || series.title,
         activeSegmentId: activeSeg?.id,
-        participantCount: Math.max(participants.length, 24),
+        participantCount: participants.length,
         categories: ['Gemini AI', 'Architecture', 'Performance', 'Grounding', 'General'],
         series: sanitizeSeriesForPublic(series),
       });
@@ -896,7 +896,7 @@ app.get('/api/live-room', (req, res) => {
         activeSpeaker: session.speaker?.name || session.speakerName || 'Speaker',
         activeSpeakerRole: session.speaker?.title || 'Keynote',
         activeTalk: session.title,
-        participantCount: Math.max(participants.length, 16),
+        participantCount: participants.length,
         categories: session.categories || ['General'],
         session,
       });
@@ -1043,39 +1043,6 @@ app.post('/api/sessions/:code/settings', (req, res) => {
   res.json({ success: true, settings });
 });
 
-// Demo traffic simulation
-app.post(['/api/series/:code/simulate-traffic', '/api/sessions/:code/simulate-traffic'], async (req, res) => {
-  const code = getCode(req);
-  const demoQuestions = [
-    { text: 'Will this architecture support edge workers with sub-10ms response budgets?', cat: 'Architecture' },
-    { text: 'How are vector embeddings indexed for instant semantic deduplication?', cat: 'Gemini AI' },
-    { text: 'Can the teleprompter trigger custom Web Speech rate modulation on the fly?', cat: 'Performance' },
-    { text: 'Are client fingerprints compliant with GDPR and enterprise privacy regulations?', cat: 'Security' },
-    { text: 'What is the benchmark throughput for concurrent WebSocket message broadcasting?', cat: 'Telemetry' },
-  ];
-
-  const picked = demoQuestions[Math.floor(Math.random() * demoQuestions.length)];
-  const names = ['Maya Chen', 'Liam O\'Connor', 'Fatima Al-Sayed', 'Kenji Sato', 'Zoe Martinez'];
-  const name = names[Math.floor(Math.random() * names.length)];
-
-  await qaStore.submitQuestion({
-    joinCode: code,
-    clientFingerprint: `sim-${Math.random().toString(36).substring(2, 7)}`,
-    authorName: name,
-    isAnonymous: Math.random() > 0.6,
-    content: picked.text,
-    category: picked.cat,
-  });
-
-  const questions = qaStore.getQuestions(code);
-  if (questions.length > 0) {
-    const targetQ = questions[Math.floor(Math.random() * questions.length)];
-    targetQ.upvotes += Math.floor(1 + Math.random() * 3);
-    targetQ.updatedAt = new Date().toISOString();
-  }
-
-  res.json({ success: true, message: 'Simulated audience activity generated' });
-});
 
 /**
  * Serve static files from /browser

@@ -200,7 +200,7 @@ import { UserRole } from '../models/qa.models';
                   id="input-auth-name"
                   type="text"
                   formControlName="name"
-                  placeholder="e.g. Dr. Sundar Varma or Cloud Events Corp"
+                  placeholder="e.g. Your Name or Organization"
                   class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 focus:border-indigo-600 focus:bg-white rounded-xl text-xs text-slate-900 outline-none transition-colors"
                 />
               </div>
@@ -272,70 +272,6 @@ import { UserRole } from '../models/qa.models';
             }
           </button>
         </form>
-
-        <!-- 1-Click Enterprise Demo Credentials Section -->
-        <div class="mt-6 pt-5 border-t border-slate-200">
-          <div class="flex items-center justify-between mb-2.5">
-            <span class="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-              <mat-icon class="text-xs text-indigo-600">bolt</mat-icon>
-              <span>1-Click Verified Demo Credentials</span>
-            </span>
-            <span class="text-[10px] text-slate-400">Instant Evaluation</span>
-          </div>
-
-          <div class="space-y-2">
-            <button
-              type="button"
-              (click)="useDemoCredential('organizer')"
-              class="w-full py-2 px-3 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-50 text-left transition-colors flex items-center justify-between cursor-pointer group"
-            >
-              <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
-                  👑
-                </div>
-                <div>
-                  <div class="text-xs font-bold text-indigo-950">Organizer Demo (Dr. Sundar Varma)</div>
-                  <div class="text-[10px] text-indigo-700">Full workshop series, grounding decks &amp; moderation</div>
-                </div>
-              </div>
-              <mat-icon class="text-sm text-indigo-400 group-hover:translate-x-0.5 transition-transform">arrow_forward</mat-icon>
-            </button>
-
-            <button
-              type="button"
-              (click)="useDemoCredential('speaker')"
-              class="w-full py-2 px-3 rounded-xl border border-amber-200 bg-amber-50/50 hover:bg-amber-50 text-left transition-colors flex items-center justify-between cursor-pointer group"
-            >
-              <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-lg bg-amber-600 text-white flex items-center justify-center text-[10px] font-bold">
-                  🎤
-                </div>
-                <div>
-                  <div class="text-xs font-bold text-amber-950">Speaker Demo (Elena Rostova)</div>
-                  <div class="text-[10px] text-amber-700">Live teleprompter, stage notes &amp; crowd questions</div>
-                </div>
-              </div>
-              <mat-icon class="text-sm text-amber-400 group-hover:translate-x-0.5 transition-transform">arrow_forward</mat-icon>
-            </button>
-
-            <button
-              type="button"
-              (click)="useDemoCredential('moderator')"
-              class="w-full py-2 px-3 rounded-xl border border-purple-200 bg-purple-50/50 hover:bg-purple-50 text-left transition-colors flex items-center justify-between cursor-pointer group"
-            >
-              <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center text-[10px] font-bold">
-                  🛡️
-                </div>
-                <div>
-                  <div class="text-xs font-bold text-purple-950">Moderator Demo (Marcus Brody)</div>
-                  <div class="text-[10px] text-purple-700">Spam filter, review queue &amp; participant management</div>
-                </div>
-              </div>
-              <mat-icon class="text-sm text-purple-400 group-hover:translate-x-0.5 transition-transform">arrow_forward</mat-icon>
-            </button>
-          </div>
-        </div>
 
       </div>
 
@@ -428,26 +364,5 @@ export class AuthPage {
     } finally {
       this.isLoading.set(false);
     }
-  }
-
-  public useDemoCredential(role: 'organizer' | 'speaker' | 'moderator'): void {
-    this.selectedRole.set(role);
-    if (role === 'organizer') {
-      this.qaService.userRole.set('organizer');
-      this.qaService.userName.set('Dr. Sundar Varma');
-      this.qaService.userAuthToken.set('org-token-next26');
-      this.qaService.showToast('Signed in as Verified Organizer (Dr. Sundar Varma)');
-    } else if (role === 'speaker') {
-      this.qaService.userRole.set('speaker');
-      this.qaService.userName.set('Elena Rostova');
-      this.qaService.userAuthToken.set('spk-token-next26');
-      this.qaService.showToast('Signed in as Keynote Speaker (Elena Rostova)');
-    } else {
-      this.qaService.userRole.set('moderator');
-      this.qaService.userName.set('Marcus Brody');
-      this.qaService.userAuthToken.set('mod-token-next26');
-      this.qaService.showToast('Signed in as Session Moderator (Marcus Brody)');
-    }
-    this.qaService.navigateToHostStudio();
   }
 }

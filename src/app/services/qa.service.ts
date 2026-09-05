@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import {
   Session,
   SessionSettings,
@@ -108,6 +108,15 @@ export class QaService {
     this.checkUrlForTokens();
     this.loadHostedSessionHistory();
     this.fetchActiveLiveRoom();
+
+    // Attendee access guard: attendees can only view the live feed
+    effect(() => {
+      const isStaffMember = this.isStaff();
+      const currentTab = this.activeTab();
+      if (!isStaffMember && currentTab !== 'feed') {
+        this.activeTab.set('feed');
+      }
+    });
   }
 
   private initUserIdentity(): void {
@@ -139,7 +148,7 @@ export class QaService {
     try {
       const fullHref = window.location.href;
 
-      // 1. Direct searchParams on window.location.search (e.g. ?code=GDGLIVE)
+      // 1. Direct searchParams on window.location.search (e.g. ?code=ROOM123)
       const searchParams = new URLSearchParams(window.location.search);
       let rawCode =
         searchParams.get('code') ||
@@ -149,7 +158,7 @@ export class QaService {
         searchParams.get('joinCode') ||
         searchParams.get('series');
 
-      // 2. Query parameters inside hash (e.g. #/?code=GDGLIVE or #/join?code=GDGLIVE)
+      // 2. Query parameters inside hash (e.g. #/?code=ROOM123 or #/join?code=ROOM123)
       if (!rawCode && window.location.hash) {
         const hash = window.location.hash;
         const qIndex = hash.indexOf('?');
@@ -176,7 +185,7 @@ export class QaService {
           }
         }
 
-        // 4. Check direct hash route segment like #GDGLIVE or #/GDGLIVE
+        // 4. Check direct hash route segment like #ROOM123 or #/ROOM123
         if (!rawCode) {
           const cleanHash = hash.replace(/^#\/?/, '').trim();
           const reserved = [
@@ -206,7 +215,7 @@ export class QaService {
         }
       }
 
-      // 5. Check window.location.pathname e.g. /room/GDGLIVE or /series/GDGLIVE
+      // 5. Check window.location.pathname e.g. /room/ROOM123 or /series/ROOM123
       if (!rawCode && window.location.pathname) {
         const pathMatch = window.location.pathname.match(
           /\/(?:room|series|code|session)\/([A-Za-z0-9_-]+)/i
@@ -242,12 +251,14 @@ export class QaService {
       if (detectedCode) {
         this.autoJoinCode.set(detectedCode);
         this.isAutoJoiningFromUrl.set(true);
-        // Ensure attendee role
-        this.userRole.set('attendee');
-        this.userAuthToken.set(null);
+        // Only default to attendee role if no staff token was provided in URL
+        if (!urlToken) {
+          this.userRole.set('attendee');
+          this.userAuthToken.set(null);
+        }
         // Automatically join the session
         setTimeout(() => {
-          this.joinSession(detectedCode, this.userName() || 'Attendee')
+          this.joinSession(detectedCode, this.userName() || (urlToken ? 'Organizer' : 'Attendee'))
             .then((success) => {
               this.isAutoJoiningFromUrl.set(false);
               if (success) {
@@ -584,21 +595,8 @@ export class QaService {
     } catch {
       // Ignore network errors on initial boot
     }
-    // Fallback default keynote room preview
-    const fallback: ActiveLiveRoomPreview = {
-      type: 'series',
-      joinCode: 'NEXT26',
-      title: 'Google Cloud Next 2026: Multimodal AI & Live Interaction Systems',
-      description: 'Annual enterprise keynote on low-latency Gemini Flash inference and live grounded Q&A systems.',
-      state: 'LIVE',
-      activeSpeaker: 'Dr. Sundar Varma',
-      activeSpeakerRole: 'VP of Machine Learning, Google DeepMind',
-      activeTalk: 'Keynote: Multimodal AI & Live Interaction Systems',
-      participantCount: 38,
-      categories: ['Gemini AI', 'Architecture', 'Performance', 'Grounding', 'General'],
-    };
-    this.activeLiveRoom.set(fallback);
-    return fallback;
+    this.activeLiveRoom.set(null);
+    return null;
   }
 
   /**
@@ -613,7 +611,12 @@ export class QaService {
     if (!room) {
       room = await this.fetchActiveLiveRoom();
     }
-    const code = room?.joinCode || 'NEXT26';
+    const code = room?.joinCode;
+    if (!code) {
+      this.errorMessage.set('No live event is currently running. Please enter an event room code to join.');
+      this.isLoading.set(false);
+      return false;
+    }
 
     const attendeeName = opts?.anonymous
       ? 'Anonymous'
@@ -642,7 +645,8 @@ export class QaService {
    * Request Grounded RAG AI Answer for a specific question on demand
    */
   public async requestRagAnswer(questionId: string): Promise<Question | null> {
-    const code = this.currentSession()?.joinCode || this.currentSeries()?.seriesCode || 'NEXT26';
+    const code = this.currentSession()?.joinCode || this.currentSeries()?.seriesCode;
+    if (!code) return null;
     try {
       // Optimistic status update
       this.questions.update(items =>
@@ -661,7 +665,11 @@ export class QaService {
           this.questions.update(items =>
             items.map(q => (q.id === questionId ? { ...q, ...updated } : q))
           );
-          this.showToast('Grounded RAG Answer synthesized!');
+          if (updated.isGroundedOnDeck) {
+            this.showToast('Grounded RAG Answer synthesized from presentation deck!');
+          } else {
+            this.showToast('AI Answer synthesized (Generic • Not Grounded on Deck)');
+          }
           return updated;
         }
       }
@@ -1559,23 +1567,6 @@ export class QaService {
     } catch (err) {
       console.error('Error banning participant:', err);
       return false;
-    }
-  }
-
-  // Simulate Live Traffic
-  public async simulateTraffic(): Promise<void> {
-    const code = this.currentSession()?.joinCode || this.currentSeries()?.joinCode;
-    if (!code) return;
-
-    try {
-      await fetch(`/api/sessions/${code}/simulate-traffic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      this.showToast('Audience interaction simulated!');
-      await this.refreshSessionData(true);
-    } catch (err) {
-      console.error('Error simulating traffic:', err);
     }
   }
 

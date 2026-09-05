@@ -128,13 +128,6 @@ import { QaService } from '../services/qa.service';
 
           <div class="flex items-center justify-between text-xs text-[#747775]">
             <span>Tip: Structured bullet points and numeric specs work best for zero hallucination.</span>
-            <button
-              type="button"
-              (click)="loadDemoContext()"
-              class="text-[#1A73E8] hover:underline font-semibold cursor-pointer"
-            >
-              Load Sample Keynote Notes
-            </button>
           </div>
         </div>
 
@@ -278,20 +271,6 @@ export class GroundingContext {
     this.isSaving.set(true);
     await this.qaService.updateGroundingContext(val);
     this.isSaving.set(false);
-  }
-
-  public loadDemoContext(): void {
-    const sample = `KEYNOTE OUTLINE: Google Cloud Multimodal AI & Real-Time Distributed Architecture 2026
-
-Session Overview:
-- Next-generation edge streaming with sub-50ms latency across 38 global regions.
-- Gemini 2.5 and 3.0 series model matrix: Flash for real-time synthesis, Pro for deep multi-turn reasoning, Live API for bidirectional auditory streaming.
-- Vector search with ScaNN index supports 100k queries/sec with recall > 99%.
-- Data Governance: Zero customer data retention on enterprise inference endpoints; GDPR, HIPAA, SOC2 Type II certified.
-- Cost Optimization: Dynamic context caching cuts repetitive prompt processing cost by up to 75%.
-- Web Speech API integration provides zero-latency client TTS for confidence monitors.`;
-
-    this.contextControl.setValue(sample);
   }
 }
 

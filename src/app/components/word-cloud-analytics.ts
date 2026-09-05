@@ -223,21 +223,8 @@ export type WordCloudViewMode = 'cloud' | 'bubbles' | 'matrix';
               </div>
             </div>
 
-            <!-- Influx Action & View Switchers (Cloud / Bubbles / Matrix) -->
+            <!-- View Switchers (Cloud / Bubbles / Matrix) -->
             <div class="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-              <!-- Simulate Data Influx button to demonstrate smooth transition -->
-              <button
-                type="button"
-                id="btn-simulate-data-influx"
-                (click)="injectSampleData()"
-                [disabled]="isInjectingData()"
-                class="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-[#E8F0FE] text-[#1A73E8] hover:bg-[#D2E3FC] disabled:opacity-50 transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs"
-                title="Inject realistic attendee inquiry to trigger frequency transitions"
-              >
-                <mat-icon class="text-sm" [class.animate-spin]="isInjectingData()">{{ isInjectingData() ? 'sync' : 'add_circle' }}</mat-icon>
-                <span class="hidden md:inline">{{ isInjectingData() ? 'Injecting...' : 'Simulate Influx' }}</span>
-                <span class="md:hidden">Influx</span>
-              </button>
 
               <div class="flex items-center gap-1 p-1 bg-[#F1F3F4] rounded-xl border border-[#E0E2EC]/70">
                 <button
@@ -1004,7 +991,6 @@ export class WordCloudAnalytics implements AfterViewInit, OnDestroy {
   public previousWordCounts = new Map<string, number>();
   public surgingWords = signal<Map<string, { delta: number; count: number; timestamp: number }>>(new Map());
   public lastSurgeNotice = signal<{ word: string; count: number; delta: number; isNew: boolean } | null>(null);
-  public isInjectingData = signal<boolean>(false);
   private surgeClearTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private leaveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1487,47 +1473,6 @@ export class WordCloudAnalytics implements AfterViewInit, OnDestroy {
   public getSurgeInfo(word: string): { isSurging: boolean; delta: number } {
     const s = this.surgingWords().get(word);
     return { isSurging: !!s, delta: s?.delta ?? 0 };
-  }
-
-  // --- Simulate Real-Time Attendee Influx to showcase smooth frequency morphing ---
-  public async injectSampleData(): Promise<void> {
-    if (this.isInjectingData()) return;
-    this.isInjectingData.set(true);
-
-    const sampleInquiries = [
-      {
-        content: 'How does real-time streaming scale latency and performance across distributed microservices?',
-        category: 'Architecture',
-      },
-      {
-        content: 'What are best practices for secure token authentication with OAuth and Firestore?',
-        category: 'Security',
-      },
-      {
-        content: 'Can we optimize vector embeddings with Gemini 2.5 Pro for semantic search and topic clusters?',
-        category: 'AI & ML',
-      },
-      {
-        content: 'How do we handle WebSocket failover and automatic cluster reconnects under high attendee load?',
-        category: 'Performance',
-      },
-      {
-        content: 'What is the deployment strategy for Cloud Run containers with zero downtime rollback?',
-        category: 'DevOps',
-      },
-    ];
-
-    try {
-      const randomInquiry = sampleInquiries[Math.floor(Math.random() * sampleInquiries.length)];
-      await this.qaService.submitQuestion(randomInquiry.content, randomInquiry.category, false);
-      await this.qaService.refreshSessionData(true);
-    } catch (err) {
-      console.warn('Influx simulation notice:', err);
-    } finally {
-      setTimeout(() => {
-        this.isInjectingData.set(false);
-      }, 600);
-    }
   }
 
   public ngAfterViewInit(): void {

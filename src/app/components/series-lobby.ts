@@ -1263,7 +1263,7 @@ import { Segment, Question } from '../models/qa.models';
                         </div>
                         @if (q.aiLine1) {
                           <div class="text-[11px] text-indigo-900/80 bg-white p-1.5 rounded-lg border border-indigo-100">
-                            <strong>AI:</strong> {{ q.aiLine1 }}
+                            <strong>AI ({{ q.isGroundedOnDeck ? 'Deck Grounded' : 'Generic' }}):</strong> {{ q.aiLine1 }}
                           </div>
                         }
                       </div>

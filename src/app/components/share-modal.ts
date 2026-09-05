@@ -12,7 +12,6 @@ import * as QRCode from 'qrcode';
 import { QaService } from '../services/qa.service';
 
 export const CLOUD_RUN_DEV_URL = 'https://ais-dev-er5cbhqzhrr7gn4nf5ibs2-583451844279.asia-east1.run.app';
-export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
 
 @Component({
   selector: 'app-share-modal',
@@ -87,71 +86,6 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
             </div>
           </div>
 
-          <!-- Domain Destination Selector Tabs -->
-          <div class="mb-4">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Choose Link &amp; QR Destination:
-              </span>
-              <span class="text-[11px] text-indigo-600 font-medium">
-                QR regenerates automatically
-              </span>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/70">
-              <!-- Tab 1: Cloud Run URL -->
-              <button
-                id="btn-tab-cloudrun"
-                type="button"
-                (click)="selectDomain('cloudrun')"
-                class="p-2.5 rounded-xl text-left transition-all cursor-pointer flex flex-col justify-center"
-                [class.bg-white]="selectedDomain() === 'cloudrun'"
-                [class.shadow-xs]="selectedDomain() === 'cloudrun'"
-                [class.border]="selectedDomain() === 'cloudrun'"
-                [class.border-slate-200]="selectedDomain() === 'cloudrun'"
-                [class.text-indigo-900]="selectedDomain() === 'cloudrun'"
-                [class.text-slate-600]="selectedDomain() !== 'cloudrun'"
-                [class.hover:bg-slate-200/60]="selectedDomain() !== 'cloudrun'"
-              >
-                <div class="flex items-center gap-1.5 text-xs font-bold font-mono">
-                  <mat-icon class="text-sm text-indigo-600">cloud</mat-icon>
-                  <span>Cloud Run Instance</span>
-                  @if (selectedDomain() === 'cloudrun') {
-                    <span class="ml-auto w-2 h-2 rounded-full bg-emerald-500"></span>
-                  }
-                </div>
-                <div class="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
-                  ais-dev-...run.app/?code={{ modalData.joinCode }}
-                </div>
-              </button>
-
-              <!-- Tab 2: AI Studio Custom Domain -->
-              <button
-                id="btn-tab-studio"
-                type="button"
-                (click)="selectDomain('studio')"
-                class="p-2.5 rounded-xl text-left transition-all cursor-pointer flex flex-col justify-center"
-                [class.bg-white]="selectedDomain() === 'studio'"
-                [class.shadow-xs]="selectedDomain() === 'studio'"
-                [class.border]="selectedDomain() === 'studio'"
-                [class.border-slate-200]="selectedDomain() === 'studio'"
-                [class.text-indigo-900]="selectedDomain() === 'studio'"
-                [class.text-slate-600]="selectedDomain() !== 'studio'"
-                [class.hover:bg-slate-200/60]="selectedDomain() !== 'studio'"
-              >
-                <div class="flex items-center gap-1.5 text-xs font-bold font-mono">
-                  <mat-icon class="text-sm text-indigo-600">domain</mat-icon>
-                  <span>Studio Custom URL</span>
-                  @if (selectedDomain() === 'studio') {
-                    <span class="ml-auto w-2 h-2 rounded-full bg-emerald-500"></span>
-                  }
-                </div>
-                <div class="text-[10px] text-slate-500 truncate mt-0.5 font-mono">
-                  askqa-live.ai.studio/?code={{ modalData.joinCode }}
-                </div>
-              </button>
-            </div>
-          </div>
-
           <!-- QR Code Display Box -->
           <div class="text-center mb-5">
             <div
@@ -178,7 +112,7 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
 
               <!-- Encoded Link Badge under QR -->
               <div class="mt-2 text-[10px] font-mono text-slate-500 bg-slate-100 rounded-lg py-1 px-2.5 max-w-xs truncate mx-auto">
-                Encodes: {{ shareableUrl() }}
+                Encodes: {{ liveProductionUrl() }}
               </div>
 
               <!-- Enlarged Projector Badge -->
@@ -216,20 +150,30 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
             </div>
           </div>
 
-          <!-- Active Selected Link Box -->
+          <!-- SINGLE LIVE PRODUCTION RUNNING LINK BOX -->
           <div class="mb-4">
-            <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-              Active Sharable Attendee Link
-            </span>
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-700">
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>Live Production Running Link</span>
+              </span>
+              <span class="text-[11px] font-medium text-indigo-600">
+                One unified attendee URL
+              </span>
+            </div>
+
             <div class="flex items-center gap-2">
               <div class="flex-1 min-w-0 bg-slate-50 border border-slate-200/90 rounded-2xl px-3.5 py-2.5 text-xs font-mono text-slate-800 truncate select-all">
-                {{ shareableUrl() }}
+                {{ liveProductionUrl() }}
               </div>
 
               <button
                 id="btn-copy-share-link"
                 type="button"
-                (click)="copyLink(shareableUrl())"
+                (click)="copyLink(liveProductionUrl())"
                 class="px-4 py-2.5 rounded-2xl font-semibold text-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
                 [class.bg-emerald-600]="copiedLink()"
                 [class.text-white]="copiedLink()"
@@ -244,7 +188,7 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
               <button
                 id="btn-open-link-tab"
                 type="button"
-                (click)="openInNewTab(shareableUrl())"
+                (click)="openInNewTab(liveProductionUrl())"
                 class="p-2.5 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 cursor-pointer transition-colors shadow-2xs"
                 title="Open link in a new browser tab"
               >
@@ -253,76 +197,41 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
             </div>
           </div>
 
-          <!-- Both Accessible URLs List -->
-          <div class="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
-            <span class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-              Both Valid Attendee Access URLs:
-            </span>
-
-            <!-- Cloud Run URL row -->
-            <div class="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-slate-200/80">
-              <div class="min-w-0 flex items-center gap-2">
-                <span class="px-1.5 py-0.5 text-[10px] font-bold rounded bg-indigo-50 text-indigo-700 shrink-0">
-                  Cloud Run
-                </span>
-                <span class="font-mono text-xs text-slate-800 truncate">
-                  {{ cloudRunUrl() }}
-                </span>
-              </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <button
-                  id="btn-copy-cloudrun-url"
-                  type="button"
-                  (click)="copyIndividualUrl(cloudRunUrl(), 'cloudrun')"
-                  class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors flex items-center gap-1"
-                >
-                  <mat-icon class="text-xs">{{ copiedCloudRun() ? 'check' : 'content_copy' }}</mat-icon>
-                  <span>{{ copiedCloudRun() ? 'Copied' : 'Copy' }}</span>
-                </button>
-                <button
-                  type="button"
-                  (click)="openInNewTab(cloudRunUrl())"
-                  class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
-                  title="Open Cloud Run link"
-                >
-                  <mat-icon class="text-sm">open_in_new</mat-icon>
-                </button>
-              </div>
+          <!-- DIRECT LINK VS. DIRECT OPEN (CODE JOIN) GUIDANCE -->
+          <div class="mb-4 p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                How Attendees Join:
+              </span>
+              <span class="text-[10px] font-mono text-slate-400">Zero Authentication Required</span>
             </div>
 
-            <!-- Custom Studio URL row -->
-            <div class="flex items-center justify-between gap-2 p-2 bg-white rounded-xl border border-slate-200/80">
-              <div class="min-w-0 flex items-center gap-2">
-                <span class="px-1.5 py-0.5 text-[10px] font-bold rounded bg-purple-50 text-purple-700 shrink-0">
-                  Studio
-                </span>
-                <span class="font-mono text-xs text-slate-800 truncate">
-                  {{ studioUrl() }}
-                </span>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <!-- Mode 1: Direct Link -->
+              <div class="p-2.5 bg-white rounded-xl border border-slate-200/80 space-y-1">
+                <div class="flex items-center gap-1.5 font-bold text-indigo-700 text-[11px]">
+                  <mat-icon class="text-xs">link</mat-icon>
+                  <span>Via Direct Link / QR</span>
+                </div>
+                <p class="text-[11px] text-slate-600 leading-relaxed">
+                  Opening the live link directly writes the code and auto-enters the live session.
+                </p>
               </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <button
-                  id="btn-copy-studio-url"
-                  type="button"
-                  (click)="copyIndividualUrl(studioUrl(), 'studio')"
-                  class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors flex items-center gap-1"
-                >
-                  <mat-icon class="text-xs">{{ copiedStudio() ? 'check' : 'content_copy' }}</mat-icon>
-                  <span>{{ copiedStudio() ? 'Copied' : 'Copy' }}</span>
-                </button>
-                <button
-                  type="button"
-                  (click)="openInNewTab(studioUrl())"
-                  class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
-                  title="Open Studio link"
-                >
-                  <mat-icon class="text-sm">open_in_new</mat-icon>
-                </button>
+
+              <!-- Mode 2: Direct Site Open (CODE JOIN) -->
+              <div class="p-2.5 bg-white rounded-xl border border-indigo-200/80 bg-indigo-50/20 space-y-1">
+                <div class="flex items-center gap-1.5 font-bold text-indigo-900 text-[11px]">
+                  <mat-icon class="text-xs text-indigo-600">keyboard</mat-icon>
+                  <span>If Opening Site Directly</span>
+                </div>
+                <p class="text-[11px] text-slate-700 leading-relaxed">
+                  Enter Event Code <strong class="font-mono text-indigo-700 font-bold bg-indigo-100/70 px-1 py-0.2 rounded">#{{ modalData.joinCode }}</strong> and click <strong class="text-slate-900">Join via Code</strong> (CODE JOIN).
+                </p>
               </div>
             </div>
           </div>
 
-          <!-- Quick Action Buttons: Copy Code & Native Device Share -->
+          <!-- Quick Action Buttons: Copy Code, Copy Invite, & Native Share -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-4">
             <button
               id="btn-copy-room-code-modal"
@@ -331,40 +240,40 @@ export const STUDIO_CUSTOM_URL = 'https://askqa-live.ai.studio';
               class="w-full py-2.5 px-3.5 rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <mat-icon class="text-sm text-slate-500">{{ copiedCode() ? 'check' : 'tag' }}</mat-icon>
-              <span>{{ copiedCode() ? 'Code Copied!' : 'Copy Room Code #' + modalData.joinCode }}</span>
+              <span>{{ copiedCode() ? 'Code Copied!' : 'Copy Code #' + modalData.joinCode }}</span>
             </button>
 
-            @if (canNativeShare()) {
+            <button
+              id="btn-copy-invite-modal"
+              type="button"
+              (click)="copyFullInvite(modalData.title, modalData.joinCode, liveProductionUrl())"
+              class="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100/80 text-indigo-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <mat-icon class="text-sm text-indigo-600">{{ copiedInvite() ? 'check' : 'mark_email_read' }}</mat-icon>
+              <span>{{ copiedInvite() ? 'Invite Copied!' : 'Copy Full Invite Message' }}</span>
+            </button>
+          </div>
+
+          @if (canNativeShare()) {
+            <div class="mb-4">
               <button
                 id="btn-native-share-modal"
                 type="button"
-                (click)="nativeShare(modalData.title, modalData.joinCode, shareableUrl())"
-                class="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                (click)="nativeShare(modalData.title, modalData.joinCode, liveProductionUrl())"
+                class="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-300 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
               >
                 <mat-icon class="text-sm">share</mat-icon>
-                <span>Share via Apps...</span>
+                <span>Share via Device Apps...</span>
               </button>
-            } @else {
-              <button
-                id="btn-open-preview-tab"
-                type="button"
-                (click)="openInNewTab(shareableUrl())"
-                class="w-full py-2.5 px-3.5 rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <mat-icon class="text-sm text-slate-500">open_in_new</mat-icon>
-                <span>Open Attendee Tab</span>
-              </button>
-            }
-          </div>
+            </div>
+          }
 
           <!-- Presenter Slide Tip Box -->
           <div class="p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-2xl text-xs text-indigo-900/90 flex items-start gap-2.5">
             <mat-icon class="text-sm text-indigo-600 shrink-0 mt-0.5">lightbulb</mat-icon>
             <p class="leading-relaxed text-[11px] text-indigo-900/80">
               <strong class="font-semibold text-indigo-950">Presenter Slide Tip:</strong>
-              Download this QR code PNG and place it on your opening slide. Attendees scanning the QR code or visiting with
-              <span class="font-mono bg-indigo-100/70 px-1 py-0.5 rounded text-indigo-800">?code={{ modalData.joinCode }}</span>
-              will automatically bypass the code entry screen and land straight into the live interactive feed.
+              Download this QR code PNG for your presentation slides. Attendees scanning the QR code or clicking the direct link will automatically have their room code written and join immediately without manual entry.
             </p>
           </div>
         </div>
@@ -376,27 +285,40 @@ export class ShareModal {
   public qaService = inject(QaService);
 
   public qrCodeDataUrl = signal<string>('');
-  public selectedDomain = signal<'cloudrun' | 'studio'>('cloudrun');
   public copiedLink = signal<boolean>(false);
   public copiedCode = signal<boolean>(false);
-  public copiedCloudRun = signal<boolean>(false);
-  public copiedStudio = signal<boolean>(false);
+  public copiedInvite = signal<boolean>(false);
   public isPresenterEnlarged = signal<boolean>(false);
 
-  public currentJoinCode = signal<string>('NVIDIA');
+  public currentJoinCode = signal<string>('');
 
-  public cloudRunUrl = computed(() => {
-    const code = this.currentJoinCode() || 'NVIDIA';
-    return `${CLOUD_RUN_DEV_URL}/?code=${code.toUpperCase()}`;
+  private getBaseOrigin(): string {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return window.location.origin;
+    }
+    return '';
+  }
+
+  public baseSiteUrl = computed(() => {
+    return this.getBaseOrigin() || CLOUD_RUN_DEV_URL;
   });
 
-  public studioUrl = computed(() => {
-    const code = this.currentJoinCode() || 'NVIDIA';
-    return `${STUDIO_CUSTOM_URL}/?code=${code.toUpperCase()}`;
+  /**
+   * Single unified Live Production running URL for attendees.
+   */
+  public liveProductionUrl = computed(() => {
+    const code =
+      this.currentJoinCode() ||
+      this.qaService.currentSession()?.joinCode ||
+      this.qaService.currentSeries()?.seriesCode ||
+      '';
+    const base = this.baseSiteUrl();
+    return code ? `${base}/?code=${code.toUpperCase()}` : base;
   });
 
+  // Backward compatibility alias
   public shareableUrl = computed(() => {
-    return this.selectedDomain() === 'cloudrun' ? this.cloudRunUrl() : this.studioUrl();
+    return this.liveProductionUrl();
   });
 
   public canNativeShare = signal<boolean>(
@@ -410,21 +332,15 @@ export class ShareModal {
       if (data && data.joinCode) {
         const cleanCode = data.joinCode.toUpperCase().trim();
         this.currentJoinCode.set(cleanCode);
-        this.generateQrCodeForUrl(this.shareableUrl());
+        this.generateQrCodeForUrl(this.liveProductionUrl());
       } else {
         this.qrCodeDataUrl.set('');
         this.copiedLink.set(false);
         this.copiedCode.set(false);
-        this.copiedCloudRun.set(false);
-        this.copiedStudio.set(false);
+        this.copiedInvite.set(false);
         this.isPresenterEnlarged.set(false);
       }
     });
-  }
-
-  public selectDomain(domain: 'cloudrun' | 'studio'): void {
-    this.selectedDomain.set(domain);
-    this.generateQrCodeForUrl(this.shareableUrl());
   }
 
   private async generateQrCodeForUrl(url: string): Promise<void> {
@@ -456,22 +372,7 @@ export class ShareModal {
       navigator.clipboard.writeText(url);
       this.copiedLink.set(true);
       setTimeout(() => this.copiedLink.set(false), 2500);
-      this.qaService.showToast('Sharable link copied to clipboard!');
-    }
-  }
-
-  public copyIndividualUrl(url: string, type: 'cloudrun' | 'studio'): void {
-    if (!url) return;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(url);
-      if (type === 'cloudrun') {
-        this.copiedCloudRun.set(true);
-        setTimeout(() => this.copiedCloudRun.set(false), 2500);
-      } else {
-        this.copiedStudio.set(true);
-        setTimeout(() => this.copiedStudio.set(false), 2500);
-      }
-      this.qaService.showToast('Link copied to clipboard!');
+      this.qaService.showToast('Live production attendee link copied!');
     }
   }
 
@@ -485,13 +386,23 @@ export class ShareModal {
     }
   }
 
+  public copyFullInvite(title: string, code: string, url: string): void {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      const origin = this.baseSiteUrl();
+      const message = `Join live Q&A: "${title}"\n• Direct Link: ${url}\n• Or visit ${origin} and enter CODE: #${code} to JOIN`;
+      navigator.clipboard.writeText(message);
+      this.copiedInvite.set(true);
+      setTimeout(() => this.copiedInvite.set(false), 2500);
+      this.qaService.showToast('Full join invite message copied!');
+    }
+  }
+
   public downloadQrPng(code: string): void {
     const dataUrl = this.qrCodeDataUrl();
     if (!dataUrl || typeof document === 'undefined') return;
 
-    const domainName = this.selectedDomain() === 'cloudrun' ? 'CloudRun' : 'AskQlive';
     const link = document.createElement('a');
-    link.download = `AskQlive-QR-${code}-${domainName}.png`;
+    link.download = `AskQlive-QR-${code}.png`;
     link.href = dataUrl;
     document.body.appendChild(link);
     link.click();
@@ -501,11 +412,14 @@ export class ShareModal {
   }
 
   public async nativeShare(title: string, code: string, url: string): Promise<void> {
+    const origin = this.baseSiteUrl();
+    const shareText = `Join the live interactive Q&A session "${title}"!\nDirect Link: ${url}\nOr visit ${origin} & enter CODE: #${code} to JOIN`;
+
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
           title: `Join ${title} on AskQlive`,
-          text: `Join the live interactive Q&A session "${title}" using room code #${code}`,
+          text: shareText,
           url: url,
         });
         this.qaService.showToast('Shared successfully!');
@@ -515,7 +429,7 @@ export class ShareModal {
         }
       }
     } else {
-      this.copyLink(url);
+      this.copyFullInvite(title, code, url);
     }
   }
 
@@ -525,4 +439,3 @@ export class ShareModal {
     }
   }
 }
-

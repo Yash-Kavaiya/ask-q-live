@@ -55,121 +55,134 @@ import { FirebaseService } from '../services/firebase.service';
 
           <!-- Center Navigation Tabs (when in session) -->
           @if (qaService.currentSession() || qaService.currentSeries()) {
-            <nav class="hidden lg:flex items-center gap-1 bg-[#F1F3F4] p-1 rounded-xl text-sm font-medium border border-[#E0E2EC]">
-              <button
-                id="nav-tab-feed"
-                type="button"
-                (click)="qaService.activeTab.set('feed')"
-                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                [class.bg-white]="qaService.activeTab() === 'feed'"
-                [class.text-indigo-600]="qaService.activeTab() === 'feed'"
-                [class.shadow-xs]="qaService.activeTab() === 'feed'"
-                [class.text-[#444746]]="qaService.activeTab() !== 'feed'"
-              >
-                <mat-icon class="text-base">question_answer</mat-icon>
-                <span>Live Feed</span>
-                @if (qaService.questions().length > 0) {
-                  <span class="text-xs px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-600 font-semibold">
-                    {{ qaService.questions().length }}
-                  </span>
-                }
-              </button>
-
-              <!-- Series Run of Show / Control Room -->
-              <button
-                id="nav-tab-series-control"
-                type="button"
-                (click)="qaService.activeTab.set('series-control')"
-                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                [class.bg-white]="qaService.activeTab() === 'series-control'"
-                [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
-                [class.shadow-xs]="qaService.activeTab() === 'series-control'"
-                [class.text-[#444746]]="qaService.activeTab() !== 'series-control'"
-              >
-                <mat-icon class="text-base">view_timeline</mat-icon>
-                <span>Run of Show</span>
-                @if (qaService.segments().length > 0) {
-                  <span class="text-xs px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700">
-                    {{ qaService.segments().length }}
-                  </span>
-                }
-              </button>
-
-              <button
-                id="nav-tab-teleprompter"
-                type="button"
-                (click)="qaService.activeTab.set('teleprompter')"
-                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                [class.bg-white]="qaService.activeTab() === 'teleprompter'"
-                [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
-                [class.shadow-xs]="qaService.activeTab() === 'teleprompter'"
-                [class.text-[#444746]]="qaService.activeTab() !== 'teleprompter'"
-              >
-                <mat-icon class="text-base">live_tv</mat-icon>
-                <span>Teleprompter</span>
-              </button>
-
-              <button
-                id="nav-tab-analytics"
-                type="button"
-                (click)="qaService.activeTab.set('analytics')"
-                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                [class.bg-white]="qaService.activeTab() === 'analytics'"
-                [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
-                [class.shadow-xs]="qaService.activeTab() === 'analytics'"
-                [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
-              >
-                <mat-icon class="text-base">insights</mat-icon>
-                <span>Analytics</span>
-              </button>
-
-              @if (qaService.isAdmin()) {
+            @if (qaService.isStaff()) {
+              <nav class="hidden lg:flex items-center gap-1 bg-[#F1F3F4] p-1 rounded-xl text-sm font-medium border border-[#E0E2EC]">
                 <button
-                  id="nav-tab-moderation"
+                  id="nav-tab-feed"
                   type="button"
-                  (click)="qaService.activeTab.set('moderation')"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative"
-                  [class.bg-white]="qaService.activeTab() === 'moderation'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
-                  [class.shadow-xs]="qaService.activeTab() === 'moderation'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'moderation'"
+                  (click)="qaService.activeTab.set('feed')"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  [class.bg-white]="qaService.activeTab() === 'feed'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'feed'"
+                  [class.shadow-xs]="qaService.activeTab() === 'feed'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'feed'"
                 >
-                  <mat-icon class="text-base">gavel</mat-icon>
-                  <span>Moderation</span>
-                  @if (qaService.pendingModerationQuestions().length > 0) {
-                    <span class="w-2 h-2 rounded-full bg-[#D93025] animate-pulse"></span>
+                  <mat-icon class="text-base">question_answer</mat-icon>
+                  <span>Live Feed</span>
+                  @if (qaService.questions().length > 0) {
+                    <span class="text-xs px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-600 font-semibold">
+                      {{ qaService.questions().length }}
+                    </span>
+                  }
+                </button>
+
+                <!-- Series Run of Show / Control Room -->
+                <button
+                  id="nav-tab-series-control"
+                  type="button"
+                  (click)="qaService.activeTab.set('series-control')"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  [class.bg-white]="qaService.activeTab() === 'series-control'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
+                  [class.shadow-xs]="qaService.activeTab() === 'series-control'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'series-control'"
+                >
+                  <mat-icon class="text-base">view_timeline</mat-icon>
+                  <span>Run of Show</span>
+                  @if (qaService.segments().length > 0) {
+                    <span class="text-xs px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700">
+                      {{ qaService.segments().length }}
+                    </span>
                   }
                 </button>
 
                 <button
-                  id="nav-tab-grounding"
+                  id="nav-tab-teleprompter"
                   type="button"
-                  (click)="qaService.activeTab.set('grounding')"
+                  (click)="qaService.activeTab.set('teleprompter')"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                  [class.bg-white]="qaService.activeTab() === 'grounding'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
-                  [class.shadow-xs]="qaService.activeTab() === 'grounding'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'grounding'"
+                  [class.bg-white]="qaService.activeTab() === 'teleprompter'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
+                  [class.shadow-xs]="qaService.activeTab() === 'teleprompter'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'teleprompter'"
                 >
-                  <mat-icon class="text-base">auto_stories</mat-icon>
-                  <span>Grounding</span>
+                  <mat-icon class="text-base">live_tv</mat-icon>
+                  <span>Teleprompter</span>
                 </button>
-              }
 
-              <button
-                id="nav-tab-report"
-                type="button"
-                (click)="qaService.activeTab.set('report')"
-                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
-                [class.bg-white]="qaService.activeTab() === 'report'"
-                [class.text-indigo-600]="qaService.activeTab() === 'report'"
-                [class.shadow-xs]="qaService.activeTab() === 'report'"
-                [class.text-[#444746]]="qaService.activeTab() !== 'report'"
-              >
-                <mat-icon class="text-base">summarize</mat-icon>
-                <span>Report</span>
-              </button>
-            </nav>
+                <button
+                  id="nav-tab-analytics"
+                  type="button"
+                  (click)="qaService.activeTab.set('analytics')"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  [class.bg-white]="qaService.activeTab() === 'analytics'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
+                  [class.shadow-xs]="qaService.activeTab() === 'analytics'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
+                >
+                  <mat-icon class="text-base">insights</mat-icon>
+                  <span>Analytics</span>
+                </button>
+
+                @if (qaService.isAdmin()) {
+                  <button
+                    id="nav-tab-moderation"
+                    type="button"
+                    (click)="qaService.activeTab.set('moderation')"
+                    class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative"
+                    [class.bg-white]="qaService.activeTab() === 'moderation'"
+                    [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
+                    [class.shadow-xs]="qaService.activeTab() === 'moderation'"
+                    [class.text-[#444746]]="qaService.activeTab() !== 'moderation'"
+                  >
+                    <mat-icon class="text-base">gavel</mat-icon>
+                    <span>Moderation</span>
+                    @if (qaService.pendingModerationQuestions().length > 0) {
+                      <span class="w-2 h-2 rounded-full bg-[#D93025] animate-pulse"></span>
+                    }
+                  </button>
+
+                  <button
+                    id="nav-tab-grounding"
+                    type="button"
+                    (click)="qaService.activeTab.set('grounding')"
+                    class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                    [class.bg-white]="qaService.activeTab() === 'grounding'"
+                    [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
+                    [class.shadow-xs]="qaService.activeTab() === 'grounding'"
+                    [class.text-[#444746]]="qaService.activeTab() !== 'grounding'"
+                  >
+                    <mat-icon class="text-base">auto_stories</mat-icon>
+                    <span>Grounding</span>
+                  </button>
+                }
+
+                <button
+                  id="nav-tab-report"
+                  type="button"
+                  (click)="qaService.activeTab.set('report')"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  [class.bg-white]="qaService.activeTab() === 'report'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'report'"
+                  [class.shadow-xs]="qaService.activeTab() === 'report'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'report'"
+                >
+                  <mat-icon class="text-base">summarize</mat-icon>
+                  <span>Report</span>
+                </button>
+              </nav>
+            } @else {
+              <!-- Attendees only see Live Feed -->
+              <div class="hidden lg:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold">
+                <mat-icon class="text-base text-indigo-600">question_answer</mat-icon>
+                <span>Live Audience Feed</span>
+                @if (qaService.questions().length > 0) {
+                  <span class="ml-1 text-[11px] px-1.5 py-0.2 rounded-full bg-indigo-600 text-white font-bold">
+                    {{ qaService.questions().length }}
+                  </span>
+                }
+              </div>
+            }
           }
 
           <!-- Right Action Controls -->
@@ -208,18 +221,6 @@ import { FirebaseService } from '../services/firebase.service';
             }
 
             @if (qaService.currentSession() || qaService.currentSeries()) {
-              <!-- Simulate Audience Activity (Demo booster) -->
-              <button
-                id="btn-simulate-traffic"
-                type="button"
-                (click)="simulateLiveTraffic()"
-                class="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer border border-indigo-200"
-                title="Simulate live audience question &amp; upvote stream for presentation demo"
-              >
-                <mat-icon class="text-sm">bolt</mat-icon>
-                <span>Simulate</span>
-              </button>
-
               <!-- Server-Verified Role Indicator -->
               <div
                 id="badge-auth-role"
@@ -289,8 +290,8 @@ import { FirebaseService } from '../services/firebase.service';
           </div>
         </div>
 
-        <!-- Mobile Secondary Tab Bar -->
-        @if (qaService.currentSession() || qaService.currentSeries()) {
+        <!-- Mobile Secondary Tab Bar (only for staff with multiple views) -->
+        @if ((qaService.currentSession() || qaService.currentSeries()) && qaService.isStaff()) {
           <div class="flex lg:hidden overflow-x-auto py-2 gap-1.5 border-t border-[#E0E2EC] scrollbar-none text-xs">
             <button
               id="mob-tab-feed"
@@ -398,10 +399,6 @@ export class Header {
         this.isCodeCopied.set(false);
       }, 2500);
     }
-  }
-
-  public simulateLiveTraffic(): void {
-    this.qaService.simulateTraffic();
   }
 }
 

@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QaStore } from './qa-store.js';
 import { timingSafeCompare, resolveAuth, sanitizeSeriesForPublic } from './auth.js';
+import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag } from './gemini.service.js';
 
 describe('Phase P0: Series Data Model, Store, & Auth', () => {
   let store: QaStore;
 
   beforeEach(() => {
-    store = new QaStore();
+    store = new QaStore(true);
   });
 
   describe('1. Auth & Timing-Safe Comparison', () => {
@@ -255,6 +256,164 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
 
       store.banParticipant('NEXT26', fp, true, 'organizer_secret_next26');
       expect(store.isParticipantBanned('NEXT26', fp)).toBe(true);
+    });
+  });
+
+  describe('7. Grounded RAG on Deck vs Generic AI Answer Synthesis', () => {
+    it('should synthesize a grounded answer and set isGroundedOnDeck true when deck context is provided', async () => {
+      const deckContext = `
+        Dr. Sundar Varma Keynote Context:
+        - Multimodal AI models process audio, vision, and streaming text in under 450ms.
+        - Distributed memory architecture uses NVLink 5 coherent domains across 72 GPUs.
+        - Retrieval-Augmented Generation relies on semantic chunk windows with dynamic surrogate keys.
+      `;
+
+      const result = await generateTwoLineAnswer('What is the memory bandwidth for NVLink 5?', deckContext);
+      expect(result.isGroundedOnDeck).toBe(true);
+      expect(result.firstLine).toBeTruthy();
+      expect(result.secondLine).toBeTruthy();
+      expect(result.firstLine).not.toBe('Real-time response processed based on active presentation stream.');
+      expect(result.secondLine).not.toBe('Review related presentation slides for comprehensive architecture specifications.');
+    });
+
+    it('should synthesize a generic AI answer and set isGroundedOnDeck false when NO deck context is provided', async () => {
+      const result = await generateTwoLineAnswer('How does Redis handle in-memory replication?', '');
+      expect(result.isGroundedOnDeck).toBe(false);
+      expect(result.firstLine).toBeTruthy();
+      expect(result.secondLine).toBeTruthy();
+      expect(result.firstLine).not.toBe('Real-time response processed based on active presentation stream.');
+      expect(result.secondLine).not.toBe('Review related presentation slides for comprehensive architecture specifications.');
+    });
+
+    it('should set isGroundedOnDeck on question when submitting to a segment with grounding context', async () => {
+      const res = await store.submitQuestion({
+        joinCode: 'NEXT26',
+        clientFingerprint: 'attendee-fp-1',
+        authorName: 'Tech Attendee',
+        isAnonymous: false,
+        content: 'How does multimodal processing achieve sub-500ms latency?',
+        segmentId: 'seg-1',
+      });
+
+      expect(res.question).toBeDefined();
+      // Wait briefly for async AI generation to resolve
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const q = store.getQuestions('NEXT26').find(item => item.id === res.question?.id);
+      expect(q).toBeDefined();
+      expect(q?.isGroundedOnDeck).toBe(true);
+      expect(q?.aiLine1).not.toBe('Real-time response processed based on active presentation stream.');
+    });
+
+    it('should set isGroundedOnDeck false when submitting to a segment without deck context', async () => {
+      // Create a series without any deck/grounding context
+      const emptySeries = store.createSeries({
+        title: 'Impromptu Q&A Session',
+        description: 'No slides attached',
+        segments: [
+          { title: 'Open Floor', speakerName: 'Unprepared Speaker', type: 'TALK' },
+        ],
+      });
+
+      const res = await store.submitQuestion({
+        joinCode: emptySeries.seriesCode,
+        clientFingerprint: 'attendee-fp-2',
+        authorName: 'Curious Attendee',
+        isAnonymous: false,
+        content: 'What are the best practices for scaling WebSockets?',
+        segmentId: emptySeries.segments[1].id,
+      });
+
+      expect(res.question).toBeDefined();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const q = store.getQuestions(emptySeries.seriesCode).find(item => item.id === res.question?.id);
+      expect(q).toBeDefined();
+      expect(q?.isGroundedOnDeck).toBe(false);
+      expect(q?.aiLine1).not.toBe('Real-time response processed based on active presentation stream.');
+    });
+
+    it('should chunk deck content into semantic sections for vector indexing', () => {
+      const deckText = `
+Slide 1: Cloud Architecture Overview
+We run Kubernetes clusters across 3 regions with Global Server Load Balancing.
+P99 latency is 45ms.
+
+Slide 2: Security & Authentication
+We use mTLS and zero-trust IAM tokens with 15-minute expiration windows.
+
+Slide 3: Database & Caching
+Our database layer uses Cloud Spanner and Redis clusters with 99.999% availability.
+      `;
+      const chunks = chunkTextForRag(deckText, 300);
+      expect(chunks.length).toBeGreaterThanOrEqual(3);
+      expect(chunks[0]).toContain('Slide 1');
+      expect(chunks.some(c => c.includes('Security & Authentication'))).toBe(true);
+      expect(chunks.some(c => c.includes('Cloud Spanner'))).toBe(true);
+    });
+
+    it('should compute cosine similarity between embedding vectors accurately', () => {
+      const vecA = [1, 0, 0, 0];
+      const vecB = [1, 0, 0, 0];
+      const vecC = [0, 1, 0, 0];
+      const vecD = [0.5, 0.5, 0, 0];
+
+      expect(cosineSimilarity(vecA, vecB)).toBeCloseTo(1.0, 4);
+      expect(cosineSimilarity(vecA, vecC)).toBeCloseTo(0.0, 4);
+      expect(cosineSimilarity(vecA, vecD)).toBeGreaterThan(0.5);
+    });
+
+    it('should perform embedding RAG to rank the most relevant chunk for a query', async () => {
+      const chunks = [
+        'Slide 1: We use Go and Rust microservices for high throughput.',
+        'Slide 2: Security compliance includes SOC2 Type II, ISO 27001, and HIPAA.',
+        'Slide 3: Real-time messaging uses WebSockets with Redis pub/sub backplane.',
+      ];
+
+      const rag = await performEmbeddingRag('What security certifications and compliance do you have?', chunks);
+      expect(rag.ragModel).toContain('text-embedding-004');
+      expect(rag.retrievedChunks.length).toBeGreaterThanOrEqual(1);
+      // The top chunk should match the security slide
+      expect(rag.retrievedChunks[0]).toContain('Security compliance');
+      expect(rag.topSimilarity).toBeGreaterThan(0);
+    });
+
+    it('should include Gemini Embedding 2 metadata when generating grounded answers', async () => {
+      const ans = await generateTwoLineAnswer(
+        'What database is used for multi-region active replication?',
+        'Slide 1: Primary storage uses Google Cloud Spanner with 99.999% SLA across multi-region clusters.'
+      );
+      expect(ans.isGroundedOnDeck).toBe(true);
+      expect(ans.ragModel).toContain('text-embedding-004');
+      expect(typeof ans.topSimilarity).toBe('number');
+      expect(ans.firstLine).toBeTruthy();
+      expect(ans.secondLine).toBeTruthy();
+    });
+
+    it('should answer "WHICH TOPIC IS THIS SESSION" with an expert grounded answer without boilerplate cop-outs', async () => {
+      const deck = `Session Title: Next-Gen Autonomous AI Agents on Google Cloud
+Speaker: Dr. Maya Lin (Principal AI Architect)
+
+Slide 1: Architecture & Tool Calling
+We deploy multi-agent swarms using Google Agent Development Kit (ADK) and Gemini 2.5 Flash.
+
+Slide 2: Low-Latency Grounding & RAG
+Real-time indexing uses Gemini Embedding 2 (text-embedding-004) with sub-300ms vector lookup.
+
+Slide 3: High-Availability Production Runtime
+Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
+
+      const ans = await generateTwoLineAnswer('WHICH TOPIC IS THIS SESSION', deck);
+      expect(ans.isGroundedOnDeck).toBe(true);
+      expect(ans.confidenceScore).toBeGreaterThanOrEqual(0.90);
+      expect(ans.firstLine).toContain('Next-Gen Autonomous AI Agents on Google Cloud');
+      expect(ans.firstLine).not.toContain('does not explicitly address this detail');
+      expect(ans.secondLine).not.toContain('Consult the session presenter');
+    });
+
+    it('should provide substantive expert fallback when attendee asks about topic on session without deck', async () => {
+      const ans = await generateTwoLineAnswer('Which topic is this session?', undefined);
+      expect(ans.isGroundedOnDeck).toBe(false);
+      expect(ans.firstLine).toContain('interactive Q&A');
+      expect(ans.firstLine).not.toContain('does not explicitly address this detail');
     });
   });
 });

@@ -132,11 +132,21 @@ import { Question } from '../models/qa.models';
 
           <!-- Structured 2-Line AI Keynote Prompt -->
           @if (q.aiLine1) {
-            <div class="p-5 rounded-2xl bg-[#F8F9FA] border-l-4 border-l-[#1A73E8] border border-[#E0E2EC] mb-6 space-y-2">
+            <div
+              class="p-5 rounded-2xl bg-[#F8F9FA] border-l-4 border mb-6 space-y-2"
+              [class.border-l-[#1A73E8]]="q.isGroundedOnDeck"
+              [class.border-l-amber-500]="!q.isGroundedOnDeck"
+              [class.border-[#E0E2EC]]="q.isGroundedOnDeck"
+              [class.border-amber-200]="!q.isGroundedOnDeck"
+            >
               <div class="flex items-center justify-between gap-2">
-                <div class="flex items-center gap-1.5 text-xs font-bold text-[#1A73E8]">
-                  <mat-icon class="text-base">lightbulb</mat-icon>
-                  <span>Gemini Grounded Talking Points (2-Line Takeaway)</span>
+                <div
+                  class="flex items-center gap-1.5 text-xs font-bold"
+                  [class.text-[#1A73E8]]="q.isGroundedOnDeck"
+                  [class.text-amber-800]="!q.isGroundedOnDeck"
+                >
+                  <mat-icon class="text-base">{{ q.isGroundedOnDeck ? 'lightbulb' : 'psychology' }}</mat-icon>
+                  <span>{{ q.isGroundedOnDeck ? 'Gemini Grounded Talking Points (Deck Grounded)' : 'Gemini Talking Points (Generic AI • No Deck Attached)' }}</span>
                 </div>
                 @if (q.aiConfidence) {
                   <span class="text-[11px] font-mono font-bold text-[#137333]">
@@ -214,17 +224,9 @@ import { Question } from '../models/qa.models';
           <h3 class="font-display font-bold text-xl text-[#1F1F1F] mb-1">
             All Queued Questions Addressed!
           </h3>
-          <p class="text-xs sm:text-sm text-[#747775] max-w-md mx-auto mb-6">
-            There are no active inquiries waiting in the time-decay teleprompter queue. You can pick any question from the queue below or wait for new audience submissions.
+          <p class="text-xs sm:text-sm text-[#747775] max-w-md mx-auto">
+            There are no active inquiries waiting in the time-decay teleprompter queue. Questions submitted by attendees will appear here automatically.
           </p>
-          <button
-            type="button"
-            (click)="qaService.simulateTraffic()"
-            class="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-[#1A73E8] hover:bg-[#185ABC] cursor-pointer inline-flex items-center gap-1.5 shadow-xs"
-          >
-            <mat-icon class="text-sm">bolt</mat-icon>
-            <span>Simulate Audience Question</span>
-          </button>
         </div>
       }
 

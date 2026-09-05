@@ -169,6 +169,9 @@ export interface Question {
   aiLine2?: string;
   aiConfidence?: number;
   aiStatus?: 'IDLE' | 'GENERATING' | 'READY' | 'FAILED';
+  isGroundedOnDeck?: boolean;
+  ragModel?: string;
+  topSimilarity?: number;
   upvotes: number;
   isSpam: boolean;
   spamScore?: number;

@@ -39,5 +39,12 @@ import { QaService } from './services/qa.service';
 })
 export class App {
   public qaService = inject(QaService);
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __QA_APP__: App; qaService: QaService }).__QA_APP__ = this;
+      (window as unknown as { qaService: QaService }).qaService = this.qaService;
+    }
+  }
 }
 

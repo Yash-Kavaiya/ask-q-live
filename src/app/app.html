@@ -62,22 +62,49 @@
           <app-question-feed />
         }
         @case ('series-control') {
-          <app-series-control-room />
+          @if (qaService.isStaff()) {
+            <app-series-control-room />
+          } @else {
+            <app-question-feed />
+          }
         }
         @case ('analytics') {
-          <app-word-cloud-analytics />
+          @if (qaService.isStaff()) {
+            <app-word-cloud-analytics />
+          } @else {
+            <app-question-feed />
+          }
         }
         @case ('teleprompter') {
-          <app-teleprompter />
+          @if (qaService.isStaff()) {
+            <app-teleprompter />
+          } @else {
+            <app-question-feed />
+          }
         }
         @case ('moderation') {
-          <app-moderation-queue />
+          @if (qaService.isAdmin()) {
+            <app-moderation-queue />
+          } @else {
+            <app-question-feed />
+          }
         }
         @case ('grounding') {
-          <app-grounding-context />
+          @if (qaService.isAdmin()) {
+            <app-grounding-context />
+          } @else {
+            <app-question-feed />
+          }
         }
         @case ('report') {
-          <app-executive-report />
+          @if (qaService.isStaff()) {
+            <app-executive-report />
+          } @else {
+            <app-question-feed />
+          }
+        }
+        @default {
+          <app-question-feed />
         }
       }
     }

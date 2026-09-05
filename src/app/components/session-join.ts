@@ -80,30 +80,6 @@ interface SegmentDraft {
                 <label for="input-room-code" class="block text-xs font-bold text-[#444746] uppercase tracking-wider">
                   Event Room Code *
                 </label>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[10px] text-slate-400">Quick Test:</span>
-                  <button
-                    type="button"
-                    (click)="fillSampleCode('GDGLIVE')"
-                    class="text-[11px] font-bold font-mono text-purple-700 bg-purple-50 hover:bg-purple-100 px-1.5 py-0.5 rounded cursor-pointer border border-purple-200"
-                  >
-                    #GDGLIVE
-                  </button>
-                  <button
-                    type="button"
-                    (click)="fillSampleCode('NVIDIA')"
-                    class="text-[11px] font-bold font-mono text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded cursor-pointer border border-emerald-200"
-                  >
-                    #NVIDIA
-                  </button>
-                  <button
-                    type="button"
-                    (click)="fillSampleCode('NEXT26')"
-                    class="text-[11px] font-bold font-mono text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded cursor-pointer border border-indigo-200"
-                  >
-                    #NEXT26
-                  </button>
-                </div>
               </div>
 
               <div class="relative">
@@ -114,9 +90,10 @@ interface SegmentDraft {
                   id="input-room-code"
                   type="text"
                   formControlName="joinCode"
-                  placeholder="e.g. GDGLIVE, NVIDIA or NEXT26"
+                  (paste)="onRoomCodePaste($event)"
+                  placeholder="ENTER EVENT ROOM CODE"
                   class="w-full pl-10 pr-4 py-3 bg-[#F8F9FA] border-2 border-[#E0E2EC] focus:border-indigo-600 focus:bg-white focus:ring-4 focus:ring-indigo-100 rounded-xl text-base font-mono uppercase font-bold tracking-wider text-[#1F1F1F] placeholder:text-[#8E918F] transition-all outline-none"
-                  maxlength="16"
+                  maxlength="64"
                   autocapitalize="characters"
                 />
               </div>
@@ -136,7 +113,7 @@ interface SegmentDraft {
                     id="input-user-name"
                     type="text"
                     formControlName="userName"
-                    placeholder="e.g. Alex Rivera (or leave blank for Anon)"
+                    placeholder="e.g. Your Name (or leave blank for Anonymous)"
                     class="w-full pl-10 pr-4 py-2.5 bg-[#F8F9FA] border border-[#E0E2EC] focus:border-indigo-600 focus:bg-white focus:ring-2 focus:ring-indigo-100 rounded-xl text-sm text-[#1F1F1F] placeholder:text-[#8E918F] transition-all outline-none"
                     maxlength="40"
                   />
@@ -212,18 +189,6 @@ interface SegmentDraft {
             </div>
           </form>
 
-          <!-- Attendee Information Card -->
-          <div class="mt-5 pt-4 border-t border-[#E0E2EC]">
-            <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600 space-y-1">
-              <div class="font-bold text-slate-900 flex items-center gap-1.5">
-                <mat-icon class="text-sm text-indigo-600">verified_user</mat-icon>
-                <span>Zero Authentication for Attendees</span>
-              </div>
-              <p class="leading-relaxed text-[11px]">
-                Attendees join immediately with zero sign-in or credentials required. Enter the room code to submit questions, upvote topics, and see AI grounded answers synthesized from presenter notes in real time.
-              </p>
-            </div>
-          </div>
         </div>
 
         <!-- Right: Host Your Own Event Card (5 cols) - Kept Clean & Simple -->
@@ -1199,8 +1164,9 @@ export class SessionJoin implements OnInit {
     if (code) {
       this.joinForm.patchValue({ joinCode: code });
       this.qaService.autoJoinCode.set(code);
-      // Automatically join attendee into the session if not already in session or loading
-      if (!this.qaService.currentSession() && !this.qaService.currentSeries() && !this.qaService.isLoading()) {
+      // Automatically join attendee into the session if not already in session, not loading, and not staff
+      const hasStaffToken = !!this.qaService.userAuthToken();
+      if (!this.qaService.currentSession() && !this.qaService.currentSeries() && !this.qaService.isLoading() && !this.qaService.isAutoJoiningFromUrl() && !hasStaffToken) {
         setTimeout(() => {
           this.onJoinSubmit();
         }, 100);
@@ -1265,7 +1231,11 @@ export class SessionJoin implements OnInit {
   }
 
   public openQrScannerModal(): void {
-    const code = this.joinForm.get('joinCode')?.value?.trim().toUpperCase() || 'NVIDIA';
+    const code = this.joinForm.get('joinCode')?.value?.trim().toUpperCase();
+    if (!code) {
+      this.qaService.errorMessage.set('Please enter an event room code first.');
+      return;
+    }
     this.qaService.openShareModal(code, `Live Session #${code}`, 'series');
   }
 
@@ -1346,34 +1316,62 @@ export class SessionJoin implements OnInit {
     );
   }
 
-  public fillSampleCode(code: string): void {
-    const clean = code.trim().toUpperCase();
-    this.joinForm.patchValue({ joinCode: clean });
-    this.qaService.autoJoinCode.set(clean);
-    this.qaService.errorMessage.set(null);
+  public onRoomCodePaste(event: ClipboardEvent): void {
+    const pasted = event.clipboardData?.getData('text') || '';
+    if (pasted.includes('code=')) {
+      event.preventDefault();
+      const match = pasted.match(/[?&#]code=([A-Za-z0-9_-]+)/i);
+      if (match && match[1]) {
+        this.joinForm.patchValue({ joinCode: match[1].toUpperCase() });
+      } else {
+        this.joinForm.patchValue({ joinCode: pasted.trim().toUpperCase() });
+      }
+    }
   }
 
   public async onJoinSubmit(): Promise<void> {
-    const code = this.joinForm.get('joinCode')?.value?.trim().toUpperCase();
+    let rawCode = this.joinForm.get('joinCode')?.value?.trim() || '';
+    if (rawCode.includes('code=')) {
+      const match = rawCode.match(/[?&#]code=([A-Za-z0-9_-]+)/i);
+      if (match && match[1]) {
+        rawCode = match[1];
+        this.joinForm.patchValue({ joinCode: rawCode.toUpperCase() });
+      }
+    }
+    const code = rawCode.toUpperCase();
     if (!code) {
-      this.qaService.errorMessage.set('Please enter an event room code (e.g. GDGLIVE or NEXT26) to join.');
+      this.qaService.errorMessage.set('Please enter an event room code to join.');
       return;
     }
     this.qaService.autoJoinCode.set(code);
     const name = this.joinForm.get('userName')?.value?.trim() || '';
     const anon = this.joinForm.get('postAsAnonymous')?.value === true;
 
-    // Zero Auth for Attendees
-    this.qaService.userRole.set('attendee');
-    this.qaService.userAuthToken.set(null);
-    await this.qaService.joinSession(code, anon ? 'Anonymous' : name || 'Attendee');
+    // Zero Auth for Attendees (unless a staff token is already present)
+    const existingToken = this.qaService.userAuthToken();
+    if (!existingToken) {
+      this.qaService.userRole.set('attendee');
+      this.qaService.userAuthToken.set(null);
+    }
+    await this.qaService.joinSession(code, anon ? 'Anonymous' : name || (existingToken ? 'Organizer' : 'Attendee'));
+    if (existingToken) {
+      await this.qaService.authenticateRole(existingToken);
+    }
   }
 
   public async joinAsPureAnonymous(): Promise<void> {
-    let code = this.joinForm.get('joinCode')?.value?.trim().toUpperCase();
+    let rawCode = this.joinForm.get('joinCode')?.value?.trim() || '';
+    if (rawCode.includes('code=')) {
+      const match = rawCode.match(/[?&#]code=([A-Za-z0-9_-]+)/i);
+      if (match && match[1]) {
+        rawCode = match[1];
+        this.joinForm.patchValue({ joinCode: rawCode.toUpperCase() });
+      }
+    }
+    const code = rawCode.toUpperCase();
     if (!code) {
-      code = 'NVIDIA';
-      this.joinForm.patchValue({ joinCode: 'NVIDIA' });
+      this.qaService.errorMessage.set('Please enter an event room code to join.');
+      return;
     }
     // Zero Auth for Attendees
     this.qaService.userRole.set('attendee');
