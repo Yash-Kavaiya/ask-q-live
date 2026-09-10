@@ -60,8 +60,18 @@ export class FirebaseService {
         return;
       }
 
+      // Resolve apiKey: injected by SSR server into window.__FIREBASE_API_KEY__
+      const apiKey =
+        (typeof window !== 'undefined' &&
+          (window as Window & { __FIREBASE_API_KEY__?: string }).__FIREBASE_API_KEY__) ||
+        (typeof process !== 'undefined' && process.env?.['FIREBASE_API_KEY']) ||
+        '';
+
+      const config = { ...firebaseConfigData, apiKey };
+
       // Initialize Firebase App
-      this.app = getApps().length ? getApp() : initializeApp(firebaseConfigData);
+      this.app = getApps().length ? getApp() : initializeApp(config);
+
 
       // Initialize Firestore with specific database ID if provided
       if (firebaseConfigData.firestoreDatabaseId) {

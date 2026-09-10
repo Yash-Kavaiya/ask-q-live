@@ -1058,14 +1058,42 @@ app.use(
 /**
  * Handle all other requests by rendering the Angular application.
  */
-app.use((req, res, next) => {
-  angularApp
-    .handle(req)
-    .then((response) =>
-      response ? writeResponseToNodeResponse(response, res) : next(),
-    )
-    .catch(next);
+/**
+ * Inject server-side environment variables into the rendered HTML so the
+ * browser bundle can access them without baking secrets into source code.
+ * Cloud Run provides FIREBASE_API_KEY via Secret Manager at runtime.
+ */
+const FIREBASE_API_KEY = process.env['FIREBASE_API_KEY'] || '';
+
+app.use(async (req, res, next) => {
+  try {
+    const response = await angularApp.handle(req);
+    if (!response) {
+      next();
+      return;
+    }
+
+    // Only inject into HTML responses
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html') && FIREBASE_API_KEY) {
+      const originalText = await response.text();
+      const injected = originalText.replace(
+        '<head>',
+        `<head><script>window.__FIREBASE_API_KEY__=${JSON.stringify(FIREBASE_API_KEY)}</script>`
+      );
+      const patchedResponse = new Response(injected, {
+        status: response.status,
+        headers: response.headers,
+      });
+      await writeResponseToNodeResponse(patchedResponse, res);
+    } else {
+      await writeResponseToNodeResponse(response, res);
+    }
+  } catch (err) {
+    next(err);
+  }
 });
+
 
 /**
  * Start the server if this module is the main entry point, or it is ran via PM2.
