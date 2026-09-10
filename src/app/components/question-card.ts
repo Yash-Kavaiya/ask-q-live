@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
-import { Question, QuestionStatus } from '../models/qa.models';
+import { Question, QuestionStatus, HumanAnswer } from '../models/qa.models';
 import { QaService } from '../services/qa.service';
 import { VoiceService } from '../services/voice.service';
 
@@ -385,10 +385,82 @@ import { VoiceService } from '../services/voice.service';
               </div>
             }
 
+            <!-- Community & Speaker Human Answers Thread -->
+            @if (q.humanAnswers && q.humanAnswers.length > 0) {
+              <div class="mt-3.5 pt-3 border-t border-[#E0E2EC]/70 space-y-2">
+                <div class="flex items-center gap-1.5 text-xs font-bold text-[#444746]">
+                  <mat-icon class="text-sm text-indigo-600">forum</mat-icon>
+                  <span>Answers ({{ q.humanAnswers.length }})</span>
+                </div>
+
+                <div class="space-y-2 pl-1 sm:pl-2">
+                  @for (ans of q.humanAnswers; track ans.id) {
+                    <div class="rounded-xl p-3 bg-[#F8F9FA] border border-[#E0E2EC] text-xs space-y-1.5 transition-all">
+                      <div class="flex items-center justify-between gap-2 flex-wrap">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <!-- Avatar -->
+                          <div
+                            class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white uppercase shrink-0"
+                            [style.background-color]="getAvatarColor(ans.authorName)"
+                          >
+                            {{ ans.authorName.charAt(0) }}
+                          </div>
+
+                          <span class="font-bold text-[#1F1F1F]">{{ ans.authorName }}</span>
+
+                          <!-- Role Badge -->
+                          @if (ans.authorRole === 'speaker') {
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-bold border border-indigo-200">
+                              <mat-icon class="text-[11px]">record_voice_over</mat-icon>
+                              Speaker
+                            </span>
+                          } @else if (ans.authorRole === 'organizer') {
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200">
+                              <mat-icon class="text-[11px]">star</mat-icon>
+                              Host
+                            </span>
+                          } @else if (ans.authorRole === 'moderator') {
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[10px] font-bold border border-purple-200">
+                              <mat-icon class="text-[11px]">shield</mat-icon>
+                              Moderator
+                            </span>
+                          } @else {
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                              <mat-icon class="text-[11px]">person</mat-icon>
+                              Attendee
+                            </span>
+                          }
+
+                          <span class="text-[#747775]">•</span>
+                          <span class="text-[#747775] text-[11px]">{{ getRelativeTime(ans.createdAt) }}</span>
+                        </div>
+
+                        <!-- Delete button if author or host/speaker -->
+                        @if (canDeleteAnswer(ans)) {
+                          <button
+                            type="button"
+                            (click)="deleteAnswer(q.id, ans.id)"
+                            class="p-1 rounded text-[#747775] hover:text-[#D93025] hover:bg-[#FCE8E6] cursor-pointer"
+                            title="Delete answer"
+                          >
+                            <mat-icon class="text-xs">delete</mat-icon>
+                          </button>
+                        }
+                      </div>
+
+                      <p class="text-[#1F1F1F] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap pl-7">
+                        {{ ans.content }}
+                      </p>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
             <!-- Bottom Action Row -->
             <div class="mt-3.5 pt-2.5 border-t border-[#E0E2EC]/60 flex items-center justify-between gap-2 flex-wrap">
               
-              <!-- Left: Author Actions & Mobile Thumbs-Up -->
+              <!-- Left: Author Actions & Mobile Thumbs-Up & Answer Toggle Button -->
               <div class="flex items-center gap-2 flex-wrap">
                 <!-- Mobile Thumbs-Up Action Button -->
                 <button
@@ -407,6 +479,26 @@ import { VoiceService } from '../services/voice.service';
                   <mat-icon class="text-sm">{{ isUpvoted() ? 'thumb_up' : 'thumb_up_off_alt' }}</mat-icon>
                   <span>{{ isUpvoted() ? 'Thumbs Up ✓' : 'Thumbs Up' }}</span>
                   <span class="font-mono font-bold">({{ q.upvotes }})</span>
+                </button>
+
+                <!-- Answer Button (For all roles: Speaker, Host, Moderator, Attendee) -->
+                <button
+                  [id]="'btn-toggle-answer-' + q.id"
+                  type="button"
+                  (click)="toggleAnswering()"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer select-none"
+                  [class.bg-indigo-50]="isAnswering()"
+                  [class.text-indigo-700]="isAnswering()"
+                  [class.border-indigo-300]="isAnswering()"
+                  [class.bg-[#F8F9FA]]="!isAnswering()"
+                  [class.text-[#444746]]="!isAnswering()"
+                  [class.border-[#E0E2EC]]="!isAnswering()"
+                  [class.hover:bg-indigo-50/60]="!isAnswering()"
+                  [class.hover:text-indigo-700]="!isAnswering()"
+                  title="Answer this question"
+                >
+                  <mat-icon class="text-sm">chat_bubble_outline</mat-icon>
+                  <span>{{ (q.humanAnswers && q.humanAnswers.length > 0) ? 'Answers (' + q.humanAnswers.length + ')' : 'Answer' }}</span>
                 </button>
 
                 @if (isAuthor() || qaService.isAdmin()) {
@@ -480,6 +572,92 @@ import { VoiceService } from '../services/voice.service';
                 </div>
               }
             </div>
+
+            <!-- Inline Answer Composer Box -->
+            @if (isAnswering()) {
+              <div class="mt-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2.5 transition-all">
+                <div class="flex items-center justify-between gap-2 flex-wrap text-xs">
+                  <div class="flex items-center gap-1.5 font-medium text-slate-700">
+                    <span>Answering as</span>
+                    @if (qaService.isSpeaker()) {
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[11px] font-bold border border-indigo-200">
+                        <mat-icon class="text-xs">record_voice_over</mat-icon>
+                        Speaker
+                      </span>
+                    } @else if (qaService.isOrganizer()) {
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold border border-blue-200">
+                        <mat-icon class="text-xs">star</mat-icon>
+                        Host
+                      </span>
+                    } @else if (qaService.userRole() === 'moderator') {
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-bold border border-purple-200">
+                        <mat-icon class="text-xs">shield</mat-icon>
+                        Moderator
+                      </span>
+                    } @else {
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                        <mat-icon class="text-xs">person</mat-icon>
+                        Attendee
+                      </span>
+                    }
+                    <span class="font-bold text-slate-900 truncate max-w-[160px]">
+                      {{ qaService.userName() || 'Attendee' }}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="isAnswering.set(false)"
+                    class="text-slate-400 hover:text-slate-600 p-0.5 rounded-md cursor-pointer"
+                  >
+                    <mat-icon class="text-sm">close</mat-icon>
+                  </button>
+                </div>
+
+                <textarea
+                  [formControl]="answerControl"
+                  rows="2"
+                  placeholder="Write your answer to this question..."
+                  class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all resize-none"
+                ></textarea>
+
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  @if (!qaService.userName()) {
+                    <div class="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="text"
+                        [formControl]="answerAuthorNameControl"
+                        placeholder="Your Name"
+                        class="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-500 w-36"
+                      />
+                    </div>
+                  } @else {
+                    <span></span>
+                  }
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      (click)="isAnswering.set(false)"
+                      class="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      (click)="submitAnswer(q.id)"
+                      [disabled]="answerControl.invalid || isSubmittingAnswer()"
+                      class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-xs flex items-center gap-1.5"
+                    >
+                      @if (isSubmittingAnswer()) {
+                        <span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      } @else {
+                        <mat-icon class="text-xs">send</mat-icon>
+                      }
+                      <span>Post Answer</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            }
           </div>
         </div>
       </article>
@@ -501,6 +679,10 @@ export class QuestionCard {
   public translatedAi2 = signal<string | null>(null);
 
   public editControl = new FormControl('', [Validators.required]);
+  public isAnswering = signal<boolean>(false);
+  public isSubmittingAnswer = signal<boolean>(false);
+  public answerControl = new FormControl('', [Validators.required]);
+  public answerAuthorNameControl = new FormControl('');
 
   public isUpvoted(): boolean {
     const q = this.question();
@@ -594,6 +776,44 @@ export class QuestionCard {
   public deleteQuestion(questionId: string): void {
     if (confirm('Are you sure you want to delete this question?')) {
       this.qaService.deleteQuestion(questionId);
+    }
+  }
+
+  public toggleAnswering(): void {
+    this.isAnswering.update(v => !v);
+  }
+
+  public canDeleteAnswer(ans: HumanAnswer): boolean {
+    if (this.qaService.isAdmin() || this.qaService.isSpeaker()) return true;
+    if (ans.clientFingerprint && ans.clientFingerprint === this.qaService.userFingerprint()) return true;
+    return false;
+  }
+
+  public async submitAnswer(questionId: string): Promise<void> {
+    if (this.answerControl.invalid) return;
+    const content = this.answerControl.value?.trim() || '';
+    if (!content) return;
+
+    const customName = this.answerAuthorNameControl.value?.trim();
+    if (customName && !this.qaService.userName()) {
+      this.qaService.setAttendeeIdentity(customName);
+    }
+
+    this.isSubmittingAnswer.set(true);
+    try {
+      const ok = await this.qaService.submitHumanAnswer(questionId, content);
+      if (ok) {
+        this.answerControl.reset();
+        this.isAnswering.set(false);
+      }
+    } finally {
+      this.isSubmittingAnswer.set(false);
+    }
+  }
+
+  public deleteAnswer(questionId: string, answerId: string): void {
+    if (confirm('Are you sure you want to delete this answer?')) {
+      this.qaService.deleteHumanAnswer(questionId, answerId);
     }
   }
 

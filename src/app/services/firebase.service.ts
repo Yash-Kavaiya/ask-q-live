@@ -352,6 +352,7 @@ export class FirebaseService {
           sentimentScore: question.sentimentScore ?? 0,
           clusteredWithId: question.clusteredWithId || '',
           clusterCount: question.clusterCount ?? 0,
+          humanAnswers: question.humanAnswers || [],
           createdAt: question.createdAt,
           updatedAt: new Date().toISOString(),
         },

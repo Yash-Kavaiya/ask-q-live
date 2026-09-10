@@ -18,6 +18,8 @@ import {
   SegmentScore,
   AuditEntry,
   PostSessionReport,
+  HumanAnswer,
+  UserRole,
 } from '../app/models/qa.models.js';
 import {
   generateTwoLineAnswer,
@@ -1547,6 +1549,92 @@ export class QaStore {
       this.sessionQuestions.set(code, list.filter(id => id !== questionId));
     }
     return true;
+  }
+
+  public addHumanAnswer(
+    joinCode: string,
+    questionId: string,
+    params: {
+      authorName: string;
+      authorRole: UserRole;
+      authorEmail?: string;
+      content: string;
+      clientFingerprint?: string;
+    }
+  ): { question: Question; answer: HumanAnswer } | null {
+    const question = this.questions.get(questionId);
+    if (!question) return null;
+
+    const answerId = 'ans-' + Math.random().toString(36).substring(2, 9);
+    const nowIso = new Date().toISOString();
+
+    const answer: HumanAnswer = {
+      id: answerId,
+      authorName: params.authorName,
+      authorRole: params.authorRole,
+      authorEmail: params.authorEmail,
+      content: params.content,
+      createdAt: nowIso,
+      clientFingerprint: params.clientFingerprint,
+    };
+
+    if (!question.humanAnswers) {
+      question.humanAnswers = [];
+    }
+    question.humanAnswers.push(answer);
+    question.updatedAt = nowIso;
+
+    const series = this.getSeries(joinCode);
+    if (series) {
+      this.logAudit({
+        seriesId: series.id,
+        segmentId: question.segmentId,
+        actorRole: params.authorRole,
+        actorRef: params.authorName,
+        action: 'HUMAN_ANSWER_ADDED',
+        targetId: questionId,
+        meta: { answerId, authorRole: params.authorRole },
+      });
+    }
+
+    return { question, answer };
+  }
+
+  public deleteHumanAnswer(
+    joinCode: string,
+    questionId: string,
+    answerId: string,
+    clientFingerprint?: string,
+    isAdmin = false
+  ): { question: Question } | null {
+    const question = this.questions.get(questionId);
+    if (!question || !question.humanAnswers) return null;
+
+    const answerIdx = question.humanAnswers.findIndex(a => a.id === answerId);
+    if (answerIdx === -1) return null;
+
+    const answer = question.humanAnswers[answerIdx];
+    if (!isAdmin && clientFingerprint && answer.clientFingerprint && answer.clientFingerprint !== clientFingerprint) {
+      return null;
+    }
+
+    question.humanAnswers.splice(answerIdx, 1);
+    question.updatedAt = new Date().toISOString();
+
+    const series = this.getSeries(joinCode);
+    if (series) {
+      this.logAudit({
+        seriesId: series.id,
+        segmentId: question.segmentId,
+        actorRole: isAdmin ? 'organizer' : 'attendee',
+        actorRef: clientFingerprint || 'user',
+        action: 'HUMAN_ANSWER_DELETED',
+        targetId: questionId,
+        meta: { answerId },
+      });
+    }
+
+    return { question };
   }
 
   public getQuestions(joinCode: string, segmentId?: string): Question[] {

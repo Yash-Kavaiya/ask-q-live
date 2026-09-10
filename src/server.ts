@@ -735,6 +735,52 @@ app.delete(['/api/series/:code/questions/:id', '/api/sessions/:code/questions/:i
   res.json({ success: true });
 });
 
+// 3i. Add Human Answer to Question (Speaker, Host/Organizer, Moderator, Attendee)
+app.post(['/api/series/:code/questions/:id/answers', '/api/sessions/:code/questions/:id/answers'], (req, res) => {
+  const code = getCode(req);
+  const id = getParam(req, 'id');
+  const { authorName, authorRole, authorEmail, content, clientFingerprint } = req.body;
+
+  if (!content || !content.trim()) {
+    res.status(400).json({ error: 'Answer content cannot be empty' });
+    return;
+  }
+
+  const result = qaStore.addHumanAnswer(code, id, {
+    authorName: authorName || 'Anonymous',
+    authorRole: authorRole || 'attendee',
+    authorEmail: authorEmail || undefined,
+    content: content.trim(),
+    clientFingerprint,
+  });
+
+  if (!result) {
+    res.status(404).json({ error: 'Question not found' });
+    return;
+  }
+
+  res.status(201).json(result);
+});
+
+// 3j. Delete Human Answer
+app.delete([
+  '/api/series/:code/questions/:id/answers/:answerId',
+  '/api/sessions/:code/questions/:id/answers/:answerId',
+], (req, res) => {
+  const code = getCode(req);
+  const id = getParam(req, 'id');
+  const answerId = getParam(req, 'answerId');
+  const { clientFingerprint, isAdmin } = req.body;
+
+  const result = qaStore.deleteHumanAnswer(code, id, answerId, clientFingerprint, !!isAdmin);
+  if (!result) {
+    res.status(403).json({ error: 'Unauthorized or answer not found' });
+    return;
+  }
+
+  res.json(result);
+});
+
 // ----------------------------------------------------------------------------
 // 4. Analytics, Telemetry, Reports, & Audit
 // ----------------------------------------------------------------------------

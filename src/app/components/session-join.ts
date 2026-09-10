@@ -1156,6 +1156,14 @@ export class SessionJoin implements OnInit {
   });
 
   public ngOnInit(): void {
+    const savedName = this.qaService.userName();
+    const savedEmail = this.qaService.userEmail();
+    if (savedName || savedEmail) {
+      this.joinForm.patchValue({
+        userName: savedName,
+        userEmail: savedEmail,
+      });
+    }
     this.checkForUrlJoinCode();
   }
 
@@ -1345,7 +1353,12 @@ export class SessionJoin implements OnInit {
     }
     this.qaService.autoJoinCode.set(code);
     const name = this.joinForm.get('userName')?.value?.trim() || '';
+    const email = this.joinForm.get('userEmail')?.value?.trim() || '';
     const anon = this.joinForm.get('postAsAnonymous')?.value === true;
+
+    if (!anon && (name || email)) {
+      this.qaService.setAttendeeIdentity(name, email);
+    }
 
     // Zero Auth for Attendees (unless a staff token is already present)
     const existingToken = this.qaService.userAuthToken();

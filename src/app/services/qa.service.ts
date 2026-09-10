@@ -49,6 +49,7 @@ export class QaService {
   // User identity & Role signals (FR-SEC-1, FR-SEC-2)
   public userFingerprint = signal<string>('');
   public userName = signal<string>('');
+  public userEmail = signal<string>('');
   public userRole = signal<UserRole>('attendee');
   public userAuthToken = signal<string | null>(null);
   public userAuthScope = signal<string[]>([]);
@@ -133,12 +134,32 @@ export class QaService {
         this.userName.set(savedName);
       }
 
+      const savedEmail = localStorage.getItem('live_qa_email');
+      if (savedEmail) {
+        this.userEmail.set(savedEmail);
+      }
+
       const savedToken = localStorage.getItem('live_qa_auth_token');
       if (savedToken) {
         this.userAuthToken.set(savedToken);
       }
     } else {
       this.userFingerprint.set('fp-guest-' + Math.random().toString(36).substring(2, 8));
+    }
+  }
+
+  public setAttendeeIdentity(name: string, email?: string): void {
+    if (name) {
+      this.userName.set(name);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('live_qa_username', name);
+      }
+    }
+    if (email !== undefined) {
+      this.userEmail.set(email);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('live_qa_email', email);
+      }
     }
   }
 
@@ -1424,6 +1445,83 @@ export class QaService {
     } catch (err) {
       console.error('Error deleting question:', err);
       await this.refreshSessionData(true);
+      return false;
+    }
+  }
+
+  // Submit Human Answer to Question (Speaker, Organizer, Moderator, or Attendee)
+  public async submitHumanAnswer(questionId: string, content: string): Promise<boolean> {
+    const code = this.currentSession()?.joinCode || this.currentSeries()?.joinCode;
+    if (!code) return false;
+    if (!content.trim()) return false;
+
+    const role: UserRole = this.userRole();
+    const authorName = this.userName() || (this.isSpeaker() ? 'Speaker' : this.isOrganizer() ? 'Host' : this.userRole() === 'moderator' ? 'Moderator' : 'Attendee');
+
+    try {
+      const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorName,
+          authorRole: role,
+          authorEmail: this.userEmail() || undefined,
+          content: content.trim(),
+          clientFingerprint: this.userFingerprint(),
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.question) {
+          this.questions.update(list => list.map(q => q.id === questionId ? data.question : q));
+          this.firebaseService.updateQuestionInFirestore(code, questionId, {
+            humanAnswers: data.question.humanAnswers,
+          });
+        }
+        this.showToast('Answer posted!');
+        await this.refreshSessionData(true);
+        return true;
+      }
+      const errData = await res.json().catch(() => ({}));
+      this.showToast(errData.error || 'Failed to post answer');
+      return false;
+    } catch (err) {
+      console.error('Error submitting answer:', err);
+      return false;
+    }
+  }
+
+  // Delete Human Answer
+  public async deleteHumanAnswer(questionId: string, answerId: string): Promise<boolean> {
+    const code = this.currentSession()?.joinCode || this.currentSeries()?.joinCode;
+    if (!code) return false;
+
+    try {
+      const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers/${answerId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientFingerprint: this.userFingerprint(),
+          isAdmin: this.isAdmin() || this.isSpeaker(),
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.question) {
+          this.questions.update(list => list.map(q => q.id === questionId ? data.question : q));
+          this.firebaseService.updateQuestionInFirestore(code, questionId, {
+            humanAnswers: data.question.humanAnswers,
+          });
+        }
+        this.showToast('Answer deleted');
+        await this.refreshSessionData(true);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error deleting answer:', err);
       return false;
     }
   }

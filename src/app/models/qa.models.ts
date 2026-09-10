@@ -150,6 +150,16 @@ export interface Session {
   graceWindowMinutes?: number;
 }
 
+export interface HumanAnswer {
+  id: string;
+  authorName: string;
+  authorRole: UserRole;
+  authorEmail?: string;
+  content: string;
+  createdAt: string;
+  clientFingerprint?: string;
+}
+
 export interface Question {
   id: string;
   sessionId: string;
@@ -182,6 +192,7 @@ export interface Question {
   clusteredWithId?: string;
   clusterCount?: number;
   decayScore?: number;
+  humanAnswers?: HumanAnswer[];
   createdAt: string;
   updatedAt: string;
 }

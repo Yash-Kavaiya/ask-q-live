@@ -20,6 +20,7 @@ export interface Question {
   upvotes: number;
   status: 'pending' | 'approved' | 'answered' | 'hidden';
   answerText?: string;
+  humanAnswers?: any[];
   createdAt: string;
 }
 
