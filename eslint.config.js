@@ -12,7 +12,7 @@ const firebaseConfig = firebaseRulesPlugin.configs?.['flat/recommended'] || fire
 
 module.exports = defineConfig([
   {
-    ignores: ['dist/**/*', 'node_modules/**/*']
+    ignores: ['dist/**/*', 'node_modules/**/*', '.angular/**/*']
   },
   {
     files: ['**/*.ts'],

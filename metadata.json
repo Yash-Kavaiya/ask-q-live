@@ -1,6 +1,8 @@
 {
-  "name": "AskQlive",
-  "description": "AI-powered real-time live session Q&A platform with instant two-line answer synthesis, automated moderation, semantic clustering, dynamic word cloud, audio synthesis, and presenter teleprompter.",
+  "name": "Live QA Platform",
+  "description": "Interactive real-time Q&A and polling platform for events, presentations, and live audiences with instant moderation and participant engagement.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
