@@ -206,7 +206,12 @@ export interface SegmentDraft {
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             @for (session of qaService.hostedSessions(); track session.joinCode) {
               <div
-                class="p-4 rounded-2xl border border-slate-200 bg-slate-50/40 hover:bg-white hover:border-indigo-200 hover:shadow-sm transition-all space-y-3"
+                class="p-5 rounded-2xl border border-slate-200 bg-slate-50/40 hover:bg-white hover:border-indigo-400 hover:shadow-md transition-all space-y-3.5 cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                (click)="reenterAsHost(session)"
+                role="button"
+                tabindex="0"
+                (keydown.enter)="reenterAsHost(session)"
+                (keydown.space)="$event.preventDefault(); reenterAsHost(session)"
               >
                 <div class="flex items-start justify-between gap-2">
                   <div class="flex items-center gap-2">
@@ -226,8 +231,8 @@ export interface SegmentDraft {
 
                   <button
                     type="button"
-                    (click)="qaService.removeHostedSession(session.joinCode)"
-                    class="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition-colors cursor-pointer"
+                    (click)="$event.stopPropagation(); qaService.removeHostedSession(session.joinCode)"
+                    class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
                     title="Remove from history"
                   >
                     <mat-icon class="text-base">delete_outline</mat-icon>
@@ -235,34 +240,44 @@ export interface SegmentDraft {
                 </div>
 
                 <div>
-                  <h3 class="font-display font-bold text-sm text-slate-900 leading-snug line-clamp-1">
-                    {{ session.title }}
-                  </h3>
+                  <div class="flex items-center justify-between gap-2">
+                    <h3 class="font-display font-bold text-base text-slate-900 group-hover:text-indigo-600 transition-colors leading-snug line-clamp-1">
+                      {{ session.title }}
+                    </h3>
+                    <span class="text-indigo-600 group-hover:translate-x-0.5 transition-transform flex items-center shrink-0">
+                      <mat-icon class="text-sm">arrow_forward</mat-icon>
+                    </span>
+                  </div>
                   @if (session.description) {
                     <p class="text-xs text-slate-500 line-clamp-1 mt-0.5">{{ session.description }}</p>
                   }
                 </div>
 
                 <div class="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-100">
-                  <span>{{ formatDate(session.lastAccessedAt) }}</span>
-                  <span>{{ session.type === 'series' ? (session.segmentCount || 1) + ' segments' : (session.questionCount || 0) + ' questions' }}</span>
+                  <span class="flex items-center gap-1">
+                    <mat-icon class="text-xs">schedule</mat-icon>
+                    <span>{{ formatDate(session.lastAccessedAt) }}</span>
+                  </span>
+                  <span class="font-medium text-slate-600">
+                    {{ session.type === 'series' ? (session.segmentCount || 1) + ' segments' : (session.questionCount || 0) + ' questions' }}
+                  </span>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2 pt-1">
                   <button
                     type="button"
-                    (click)="reenterAsHost(session)"
+                    (click)="$event.stopPropagation(); reenterAsHost(session)"
                     [disabled]="qaService.isLoading()"
-                    class="py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                    class="py-2.5 px-3 rounded-xl bg-indigo-600 group-hover:bg-indigo-700 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                   >
-                    <mat-icon class="text-sm">login</mat-icon>
-                    <span>Resume as Host</span>
+                    <mat-icon class="text-sm">dashboard</mat-icon>
+                    <span>Open Dashboard</span>
                   </button>
 
                   <button
                     type="button"
-                    (click)="openShare(session)"
-                    class="py-2 px-3 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    (click)="$event.stopPropagation(); openShare(session)"
+                    class="py-2.5 px-3 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                   >
                     <mat-icon class="text-sm text-indigo-600">qr_code_2</mat-icon>
                     <span>Share QR</span>

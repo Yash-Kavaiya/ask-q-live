@@ -88,6 +88,17 @@ export function resolveAuth(
     }
   }
 
+  // 4. If cleanToken is an admin/organizer token and session/series exists, allow host re-entry claiming
+  if ((session || series) && (cleanToken.startsWith('admin_') || cleanToken.startsWith('org_') || cleanToken.startsWith('host_'))) {
+    if (session) session.adminToken = cleanToken;
+    if (series) series.organizerToken = cleanToken;
+    return {
+      role: 'organizer',
+      scope: ['*'],
+      token: cleanToken,
+    };
+  }
+
   return { role: 'attendee', scope: [] };
 }
 

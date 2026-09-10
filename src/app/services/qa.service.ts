@@ -536,11 +536,51 @@ export class QaService {
     this.showToast('Past session history cleared.');
   }
 
+  public loadQuestionsLocally(joinCode: string): Question[] {
+    if (typeof window === 'undefined' || !window.localStorage) return [];
+    try {
+      const code = joinCode.toUpperCase().trim();
+      const raw = localStorage.getItem(`askqlive_questions_${code}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+
+  public saveQuestionsLocally(joinCode: string, questions: Question[]): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const code = joinCode.toUpperCase().trim();
+      localStorage.setItem(`askqlive_questions_${code}`, JSON.stringify(questions));
+    } catch {
+      // ignore
+    }
+  }
+
   public async reenterAsHost(record: HostedSessionRecord): Promise<boolean> {
     this.isLoading.set(true);
+    this.errorMessage.set(null);
     const code = record.joinCode.toUpperCase().trim();
 
-    // Store admin token in service and localStorage if present
+    // 1. Reset all filters and search so the host sees ALL questions
+    this.filterCategory.set('ALL');
+    this.filterStatus.set('ALL');
+    this.selectedSegmentFilter.set('ALL');
+    this.searchQuery.set('');
+
+    // 2. Pre-load local questions cache immediately
+    const cachedQuestions = this.loadQuestionsLocally(code);
+    if (cachedQuestions.length > 0) {
+      this.questions.set(cachedQuestions);
+    }
+
+    // 3. Set host role and token immediately so isStaff() and isAdmin() are true
+    this.userRole.set('organizer');
+    this.userAuthScope.set(['*']);
     if (record.adminToken) {
       this.userAuthToken.set(record.adminToken);
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -549,30 +589,48 @@ export class QaService {
     }
 
     try {
-      const joined = await this.joinSession(code, this.userName() || 'Organizer');
-      if (joined) {
-        if (record.adminToken) {
-          await this.authenticateRole(record.adminToken);
-        } else {
-          this.userRole.set('organizer');
-        }
+      // 4. Join session passing full metadata so server can restore if needed
+      const joined = await this.joinSession(code, this.userName() || 'Organizer', {
+        adminToken: record.adminToken,
+        title: record.title,
+        description: record.description,
+        type: record.type,
+      });
 
-        // Bump lastAccessedAt in history
+      if (joined) {
+        // 5. Authenticate / claim role on backend
+        if (record.adminToken) {
+          try {
+            await this.authenticateRole(record.adminToken);
+          } catch {
+            // fallback
+          }
+        }
+        // Past hosted session entry ALWAYS grants host/organizer role for the entire event dashboard
+        this.userRole.set('organizer');
+        this.userAuthScope.set(['*']);
+
+        // 6. Update record in history with latest question count and timestamp
+        const totalQ = this.questions().length || record.questionCount || 0;
         this.saveHostedSession({
           joinCode: code,
           title: record.title,
+          description: record.description,
           type: record.type,
-          adminToken: record.adminToken,
+          adminToken: record.adminToken || this.userAuthToken() || '',
           status: 'ACTIVE',
+          segmentCount: record.segmentCount,
+          questionCount: totalQ,
         });
 
+        // 7. Activate appropriate tab
         if (record.type === 'series') {
           this.activeTab.set('series-control');
         } else {
           this.activeTab.set('feed');
         }
 
-        this.showToast(`Re-entered #${code} as Event Host.`);
+        this.showToast(`Opened #${code} as Event Host. Session dashboard is ready.`);
         this.isLoading.set(false);
         return true;
       }
@@ -580,7 +638,7 @@ export class QaService {
       return false;
     } catch (err: unknown) {
       this.isLoading.set(false);
-      const msg = err instanceof Error ? err.message : 'Could not re-enter session as host';
+      const msg = err instanceof Error ? err.message : 'Could not open session as host';
       this.errorMessage.set(msg);
       return false;
     }
@@ -707,10 +765,31 @@ export class QaService {
   // Join & Create Session Series
   // ==========================================
 
-  public async joinSession(joinCode: string, name?: string): Promise<boolean> {
+  public async joinSession(
+    joinCode: string,
+    name?: string,
+    metadata?: {
+      adminToken?: string;
+      title?: string;
+      description?: string;
+      type?: 'single' | 'series';
+    }
+  ): Promise<boolean> {
     this.isLoading.set(true);
     this.errorMessage.set(null);
     const code = joinCode.toUpperCase().trim();
+
+    // Reset filters so all questions are immediately visible
+    this.filterCategory.set('ALL');
+    this.filterStatus.set('ALL');
+    this.selectedSegmentFilter.set('ALL');
+    this.searchQuery.set('');
+
+    // Pre-load local questions cache immediately
+    const cached = this.loadQuestionsLocally(code);
+    if (cached.length > 0) {
+      this.questions.set(cached);
+    }
 
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
@@ -740,6 +819,10 @@ export class QaService {
         body: JSON.stringify({
           fingerprint: this.userFingerprint(),
           name: this.userName() || 'Attendee',
+          adminToken: metadata?.adminToken || this.userAuthToken() || undefined,
+          title: metadata?.title,
+          description: metadata?.description,
+          type: metadata?.type,
         }),
       });
 
@@ -951,6 +1034,7 @@ export class QaService {
     this.firebaseService.listenToQuestions(joinCode, (firestoreQuestions) => {
       if (firestoreQuestions && firestoreQuestions.length > 0) {
         this.questions.set(firestoreQuestions);
+        this.saveQuestionsLocally(joinCode, firestoreQuestions);
       }
     });
 
@@ -983,6 +1067,10 @@ export class QaService {
     this.telemetry.set(null);
     this.wordCloudData.set([]);
     this.teleprompterQuestions.set([]);
+    this.filterCategory.set('ALL');
+    this.filterStatus.set('ALL');
+    this.selectedSegmentFilter.set('ALL');
+    this.searchQuery.set('');
     this.activeTab.set('feed');
     this.currentView.set('join');
   }
@@ -1021,7 +1109,19 @@ export class QaService {
 
       if (questionsRes.ok) {
         const qData = await questionsRes.json();
-        this.questions.set(qData.questions || []);
+        const serverQuestions: Question[] = qData.questions || [];
+        if (serverQuestions.length > 0) {
+          this.questions.set(serverQuestions);
+          this.saveQuestionsLocally(code, serverQuestions);
+        } else {
+          // If server returned 0 questions (e.g. backend reset or cold start), restore from local cache
+          const cached = this.loadQuestionsLocally(code);
+          if (cached.length > 0) {
+            this.questions.set(cached);
+          } else {
+            this.questions.set([]);
+          }
+        }
         if (Array.isArray(qData.userUpvotedIds)) {
           this.userUpvotedIds.set(new Set(qData.userUpvotedIds));
         }
@@ -1270,6 +1370,7 @@ export class QaService {
 
       if (data.question) {
         this.firebaseService.syncQuestionToFirestore(code, data.question);
+        this.saveQuestionsLocally(code, [data.question, ...this.questions()]);
       }
 
       this.showToast(

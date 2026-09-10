@@ -191,7 +191,23 @@ app.post('/api/series/:code/join', (req, res) => {
 app.post(['/api/series/:code/claim', '/api/series/:code/auth', '/api/sessions/:code/auth'], (req, res) => {
   const code = getCode(req);
   const token = extractBearerToken(req);
-  const authInfo = resolveAuth(qaStore, code, token);
+  let authInfo = resolveAuth(qaStore, code, token);
+
+  // If claiming or if token provided by host re-entering, bind token as organizer
+  if (authInfo.role === 'attendee' && token) {
+    const session = qaStore.getSession(code);
+    const series = qaStore.getSeries(code);
+    if (session || series) {
+      if (session) session.adminToken = token.trim();
+      if (series) series.organizerToken = token.trim();
+      authInfo = {
+        role: 'organizer',
+        scope: ['*'],
+        token: token.trim(),
+      };
+    }
+  }
+
   res.json(authInfo);
 });
 
@@ -1027,29 +1043,50 @@ app.post('/api/sessions', (req, res) => {
 
 app.post('/api/sessions/:code/join', (req, res) => {
   const code = getCode(req);
-  const { fingerprint, name } = req.body;
+  const { fingerprint, name, adminToken, title, description, type } = req.body;
   let session = qaStore.getSession(code);
-  const series = qaStore.getSeries(code);
+  let series = qaStore.getSeries(code);
 
   if (!session && !series) {
     const cleanCode = code.toUpperCase().trim().replace(/[^A-Z0-9_-]/g, '');
     if (cleanCode && cleanCode.length >= 2 && cleanCode.length <= 16) {
       try {
-        session = qaStore.createSession({
-          customJoinCode: cleanCode,
-          title: `Live Interactive Q&A Room #${cleanCode}`,
-          description: `Audience interactive Q&A session for event room #${cleanCode}`,
-          contextData: `Live Q&A session for event room #${cleanCode}. Ask questions, upvote popular topics, and receive grounded AI assistance.`,
-          categories: ['General', 'Q&A', 'Community', 'Discussion'],
-        });
+        if (type === 'series') {
+          series = qaStore.createSeries({
+            customSeriesCode: cleanCode,
+            title: title || `Live Workshop Series #${cleanCode}`,
+            description: description || `Audience interactive workshop series for #${cleanCode}`,
+            organizerToken: adminToken || undefined,
+          });
+          session = qaStore.getSession(cleanCode);
+        } else {
+          session = qaStore.createSession({
+            customJoinCode: cleanCode,
+            title: title || `Live Interactive Q&A Room #${cleanCode}`,
+            description: description || `Audience interactive Q&A session for event room #${cleanCode}`,
+            contextData: `Live Q&A session for event room #${cleanCode}. Ask questions, upvote popular topics, and receive grounded AI assistance.`,
+            categories: ['General', 'Q&A', 'Community', 'Discussion'],
+            adminToken: adminToken || undefined,
+          });
+        }
       } catch {
         session = qaStore.getSession(cleanCode);
+        series = qaStore.getSeries(cleanCode);
       }
     }
   }
 
   if (!session && series) {
-    session = qaStore.getSession(code);
+    session = qaStore.ensureRootSessionForSeries(code);
+  }
+
+  // If host provides adminToken, bind it so authorization works smoothly
+  if (adminToken && typeof adminToken === 'string') {
+    const cleanToken = adminToken.trim();
+    if (cleanToken.startsWith('admin_') || cleanToken.startsWith('org_') || cleanToken.startsWith('host_')) {
+      if (session) session.adminToken = cleanToken;
+      if (series) series.organizerToken = cleanToken;
+    }
   }
 
   if (!session) {

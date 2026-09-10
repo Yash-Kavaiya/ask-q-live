@@ -166,6 +166,7 @@ export class QaStore {
     autoAdvance?: boolean;
     customSeriesCode?: string;
     customJoinCode?: string;
+    organizerToken?: string;
     settings?: Partial<SeriesSettings>;
     segments?: Partial<Segment>[];
   }): Series {
@@ -183,7 +184,7 @@ export class QaStore {
     }
 
     const seriesId = 'series-' + Math.random().toString(36).substring(2, 9);
-    const organizerToken = 'org_' + crypto.randomBytes(12).toString('hex');
+    const organizerToken = params.organizerToken || ('org_' + crypto.randomBytes(12).toString('hex'));
     const nowIso = new Date().toISOString();
 
     const defaultSettings: SeriesSettings = {
@@ -2027,6 +2028,40 @@ export class QaStore {
   // Legacy / Standalone Session CRUD & Seeding
   // ==========================================
 
+  public ensureRootSessionForSeries(seriesCode: string): Session | undefined {
+    const code = seriesCode.toUpperCase();
+    const existing = this.sessions.get(code);
+    if (existing) return existing;
+    const series = this.series.get(code);
+    if (!series) return undefined;
+    const nowIso = new Date().toISOString();
+    const rootSession: Session = {
+      id: 'session-' + series.id,
+      joinCode: code,
+      adminToken: series.organizerToken,
+      title: series.title,
+      description: series.description,
+      contextData: series.contextData,
+      isActive: true,
+      createdAt: series.createdAt || nowIso,
+      categories: ['General', 'Architecture', 'AI & ML'],
+      seriesId: series.id,
+      seriesCode: code,
+      segmentId: series.activeSegmentId || 'general',
+      settings: {
+        moderationSensitivity: series.settings?.defaultModerationSensitivity || 'BALANCED',
+        autoAiAnswers: true,
+        allowAnonymous: series.settings?.allowAnonymous ?? true,
+        maxQuestionsPerMinute: series.settings?.maxQuestionsPerMinute || 5,
+      },
+    };
+    this.sessions.set(code, rootSession);
+    if (!this.sessionQuestions.has(code)) {
+      this.sessionQuestions.set(code, []);
+    }
+    return rootSession;
+  }
+
   public getSession(joinCode: string): Session | undefined {
     return this.sessions.get(joinCode.toUpperCase());
   }
@@ -2038,6 +2073,7 @@ export class QaStore {
     categories?: string[];
     settings?: Partial<Session['settings']>;
     customJoinCode?: string;
+    adminToken?: string;
   }): Session {
     let joinCode = (params.customJoinCode || '')
       .toUpperCase()
@@ -2055,7 +2091,7 @@ export class QaStore {
     const session: Session = {
       id: 'session-' + Math.random().toString(36).substring(2, 9),
       joinCode,
-      adminToken: 'admin_' + crypto.randomBytes(8).toString('hex'),
+      adminToken: params.adminToken || ('admin_' + crypto.randomBytes(8).toString('hex')),
       title: params.title || 'Live Interactive Q&A Session',
       description: params.description,
       contextData: params.contextData,
