@@ -1,4 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter } from 'rxjs';
 import {
   Session,
   SessionSettings,
@@ -17,11 +19,20 @@ import {
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
 
+export type ActiveTab =
+  | 'feed' | 'lobby' | 'series-control' | 'teleprompter' | 'analytics'
+  | 'moderation' | 'grounding' | 'report' | 'schedule';
+
+const ROUTABLE_TABS: ActiveTab[] = [
+  'feed', 'series-control', 'teleprompter', 'analytics', 'moderation', 'grounding', 'report',
+];
+
 @Injectable({
   providedIn: 'root',
 })
 export class QaService {
   public firebaseService = inject(FirebaseService);
+  private router = inject(Router);
 
   // Core reactive signals
   public currentSession = signal<Session | null>(null);
@@ -73,9 +84,7 @@ export class QaService {
   public currentView = signal<'join' | 'auth' | 'host-studio'>('join');
 
   // Navigation & filtering signals
-  public activeTab = signal<
-    'feed' | 'lobby' | 'series-control' | 'teleprompter' | 'analytics' | 'moderation' | 'grounding' | 'report' | 'schedule'
-  >('feed');
+  public activeTab = signal<ActiveTab>('feed');
   public filterCategory = signal<string>('ALL');
   public filterStatus = signal<string>('ALL');
   public selectedSegmentFilter = signal<string>('ALL'); // 'ALL' or specific segmentId
@@ -109,15 +118,66 @@ export class QaService {
     this.checkUrlForTokens();
     this.loadHostedSessionHistory();
     this.fetchActiveLiveRoom();
+    this.syncNavigationWithRouter();
 
-    // Attendee access guard: attendees can only view the live feed
+    // Attendee access guard: attendees can only view the live feed.
+    // Route-time access is enforced by staffTabGuard/adminTabGuard; this effect
+    // is the reactive fallback for a role that changes *after* landing on a tab.
     effect(() => {
       const isStaffMember = this.isStaff();
       const currentTab = this.activeTab();
       if (!isStaffMember && currentTab !== 'feed') {
-        this.activeTab.set('feed');
+        const code = this.currentSession()?.joinCode || this.currentSeries()?.joinCode;
+        if (code) {
+          this.router.navigate([this.currentSeries() ? '/series' : '/session', code, 'feed']);
+        } else {
+          this.activeTab.set('feed');
+        }
       }
     });
+
+    // Push the URL forward to the canonical /session/:code or /series/:code form
+    // whenever session state changes outside of a route navigation (join-by-code
+    // form, host creating/re-entering a session, legacy ?code= auto-join).
+    effect(() => {
+      const session = this.currentSession();
+      const series = this.currentSeries();
+      const code = session?.joinCode || series?.joinCode;
+      if (!code) return;
+
+      const currentUrl = this.router.url.split('?')[0];
+      const expectedPrefix = `/${series ? 'series' : 'session'}/${code}`;
+      if (!currentUrl.startsWith(expectedPrefix)) {
+        this.router.navigate([series ? '/series' : '/session', code, 'feed']);
+      }
+    });
+  }
+
+  // Keeps currentView/activeTab in sync with the router (source of truth is the URL).
+  private syncNavigationWithRouter(): void {
+    this.router.events
+      .pipe(filter((event): event is NavigationEnd => event instanceof NavigationEnd))
+      .subscribe(() => this.applyRouteToViewState(this.router.url));
+    this.applyRouteToViewState(this.router.url);
+  }
+
+  private applyRouteToViewState(url: string): void {
+    const path = url.split('?')[0].split('#')[0];
+    if (path === '/' || path === '') {
+      this.currentView.set('join');
+    } else if (path.startsWith('/auth')) {
+      this.currentView.set('auth');
+    } else if (path.startsWith('/host')) {
+      this.currentView.set('host-studio');
+    }
+
+    const tabMatch = path.match(/^\/(?:session|series)\/[^/]+\/([^/]+)/);
+    if (tabMatch) {
+      const segment = tabMatch[1] === 'run-of-show' ? 'series-control' : tabMatch[1];
+      if ((ROUTABLE_TABS as string[]).includes(segment)) {
+        this.activeTab.set(segment as ActiveTab);
+      }
+    }
   }
 
   private initUserIdentity(): void {
@@ -261,6 +321,19 @@ export class QaService {
   // Detect ?token=... or ?code=... in URL and trigger zero-friction auto-join
   private checkUrlForTokens(): void {
     if (typeof window !== 'undefined' && window.location) {
+      // /session/:code and /series/:code are handled by sessionResolver — skip
+      // the legacy auto-join here to avoid a duplicate joinSession() call
+      // racing the resolver's.
+      if (/^\/(session|series)\/[A-Za-z0-9_-]+/i.test(window.location.pathname)) {
+        const params = new URLSearchParams(window.location.search);
+        const urlToken = params.get('token');
+        if (urlToken) {
+          this.userAuthToken.set(urlToken);
+          localStorage.setItem('live_qa_auth_token', urlToken);
+        }
+        return;
+      }
+
       const params = new URLSearchParams(window.location.search);
       const urlToken = params.get('token');
       if (urlToken) {
@@ -1047,14 +1120,17 @@ export class QaService {
 
   public navigateToJoin(): void {
     this.currentView.set('join');
+    this.router.navigate(['/']);
   }
 
   public navigateToAuth(): void {
     this.currentView.set('auth');
+    this.router.navigate(['/auth']);
   }
 
   public navigateToHostStudio(): void {
     this.currentView.set('host-studio');
+    this.router.navigate(['/host']);
   }
 
   public leaveSession(): void {
@@ -1073,6 +1149,7 @@ export class QaService {
     this.searchQuery.set('');
     this.activeTab.set('feed');
     this.currentView.set('join');
+    this.router.navigate(['/']);
   }
 
   private startPolling(): void {
