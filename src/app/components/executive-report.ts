@@ -129,6 +129,63 @@ import { PostSessionReport } from '../models/qa.models';
             </div>
           </div>
 
+          <!-- Deterministic Session Metrics (not AI-generated — always accurate) -->
+          @if (rep.aiCoverageRatio !== undefined || rep.sentimentBreakdown || rep.topQuestions) {
+            <div class="bg-white rounded-2xl p-6 border border-[#E0E2EC] shadow-xs space-y-4">
+              <div class="flex items-center gap-2 pb-3 border-b border-[#E0E2EC]">
+                <mat-icon class="text-[#1A73E8] text-base">query_stats</mat-icon>
+                <h3 class="font-display font-bold text-base text-[#1F1F1F]">Session Metrics</h3>
+                <span class="text-[10px] font-semibold text-[#747775] uppercase tracking-wider">Computed directly from session data</span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                @if (rep.aiCoverageRatio !== undefined) {
+                  <div class="p-4 rounded-xl bg-[#F8F9FA] border border-[#E0E2EC]">
+                    <div class="flex items-center justify-between text-xs text-[#747775] mb-2">
+                      <span class="font-semibold uppercase tracking-wider">AI Answer Coverage</span>
+                      <mat-icon class="text-sm text-[#1A73E8]">auto_awesome</mat-icon>
+                    </div>
+                    <span class="font-display font-bold text-2xl text-[#1F1F1F]">{{ rep.aiCoverageRatio }}%</span>
+                    <span class="text-xs text-[#747775]"> of questions received a synthesized answer</span>
+                  </div>
+                }
+
+                @if (rep.sentimentBreakdown; as sb) {
+                  <div class="p-4 rounded-xl bg-[#F8F9FA] border border-[#E0E2EC]">
+                    <div class="flex items-center justify-between text-xs text-[#747775] mb-2">
+                      <span class="font-semibold uppercase tracking-wider">Audience Sentiment</span>
+                      <mat-icon class="text-sm text-[#9334E6]">sentiment_satisfied_alt</mat-icon>
+                    </div>
+                    <div class="w-full h-2 bg-[#E0E2EC] rounded-full overflow-hidden flex mb-1.5">
+                      <div class="bg-[#1E8E3E] h-full" [style.width.%]="sb.positivePct"></div>
+                      <div class="bg-[#F9AB00] h-full" [style.width.%]="sb.neutralPct"></div>
+                      <div class="bg-[#D93025] h-full" [style.width.%]="sb.criticalPct"></div>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] font-mono text-[#747775]">
+                      <span class="text-[#137333]">{{ sb.positivePct }}% positive</span>
+                      <span class="text-[#B06000]">{{ sb.neutralPct }}% neutral</span>
+                      <span class="text-[#D93025]">{{ sb.criticalPct }}% critical</span>
+                    </div>
+                  </div>
+                }
+              </div>
+
+              @if (rep.topQuestions && rep.topQuestions.length > 0) {
+                <div class="pt-2 border-t border-[#E0E2EC]/70 space-y-1.5">
+                  <span class="text-[10px] font-semibold text-[#747775] uppercase tracking-wider">Top Upvoted Questions</span>
+                  @for (tq of rep.topQuestions; track tq.id) {
+                    <div class="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-[#F8F9FA] border border-[#E0E2EC]/70 text-xs">
+                      <span class="text-[#1F1F1F] truncate flex-1">"{{ tq.content }}" <span class="text-[#747775]">— {{ tq.authorName }}</span></span>
+                      <span class="shrink-0 px-2 py-0.5 rounded-md bg-[#FEF7E0] text-[#B06000] font-mono font-bold flex items-center gap-1">
+                        <mat-icon class="text-[11px]">thumb_up</mat-icon>{{ tq.upvotes }}
+                      </span>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+
           <!-- Thematic Clusters Grid -->
           <div class="bg-white rounded-2xl p-6 border border-[#E0E2EC] shadow-xs space-y-4">
             <div class="flex items-center gap-2 pb-3 border-b border-[#E0E2EC]">
