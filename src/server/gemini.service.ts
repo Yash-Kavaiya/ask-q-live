@@ -901,6 +901,7 @@ export async function generatePostSessionReport(
   sessionContext: string,
   questions: { content: string; upvotes: number; aiLine1?: string; aiLine2?: string; category?: string; status?: string }[]
 ): Promise<{
+  executiveSummary: string;
   topThemes: { title: string; description: string; questionExamples: string[] }[];
   unresolvedTopics: { topic: string; significance: string }[];
   actionableFollowUps: string[];
@@ -921,12 +922,14 @@ Questions Asked During Session:
 ${questionsContext || '1. General architecture overview and scaling guidelines.'}
 
 Synthesize a comprehensive, executive post-session intelligence report containing:
-1. Exactly top 3 thematic inquiry clusters with descriptions and sample questions.
-2. Unresolved topics or controversial inquiries that required deeper clarification.
-3. Exactly 5 concrete, actionable follow-up items for the speaker or engineering team.
-4. A full executive summary formatted in clean, elegant Markdown with tables and bullet points.`;
+1. A 2-3 sentence executive summary (executiveSummary field) of THIS session's actual engagement, themes, and audience energy — it must reflect the specific questions and context above, never generic boilerplate.
+2. Exactly top 3 thematic inquiry clusters with descriptions and sample questions.
+3. Unresolved topics or controversial inquiries that required deeper clarification.
+4. Exactly 5 concrete, actionable follow-up items for the speaker or engineering team.
+5. A full markdown report (markdownReport field) formatted in clean, elegant Markdown with tables and bullet points.`;
 
   const fallback = {
+    executiveSummary: `Session synthesis for "${sessionTitle}": ${questions.length} attendee question${questions.length === 1 ? ' was' : 's were'} captured with ${questions.reduce((sum, q) => sum + q.upvotes, 0)} total upvotes, spanning infrastructure, performance, and audience follow-up topics.`,
     topThemes: [
       {
         title: 'Infrastructure & Scalability',
@@ -972,6 +975,7 @@ Synthesize a comprehensive, executive post-session intelligence report containin
       responseSchema: {
         type: Type.OBJECT,
         properties: {
+          executiveSummary: { type: Type.STRING },
           topThemes: {
             type: Type.ARRAY,
             items: {
@@ -1004,12 +1008,13 @@ Synthesize a comprehensive, executive post-session intelligence report containin
           },
           markdownReport: { type: Type.STRING },
         },
-        required: ['topThemes', 'unresolvedTopics', 'actionableFollowUps', 'markdownReport'],
+        required: ['executiveSummary', 'topThemes', 'unresolvedTopics', 'actionableFollowUps', 'markdownReport'],
       },
     });
 
     const parsed = safeJsonParse<typeof fallback>(rawResponse, fallback);
     return {
+      executiveSummary: parsed.executiveSummary || fallback.executiveSummary,
       topThemes: Array.isArray(parsed.topThemes) && parsed.topThemes.length > 0 ? parsed.topThemes : fallback.topThemes,
       unresolvedTopics: Array.isArray(parsed.unresolvedTopics) && parsed.unresolvedTopics.length > 0 ? parsed.unresolvedTopics : fallback.unresolvedTopics,
       actionableFollowUps: Array.isArray(parsed.actionableFollowUps) && parsed.actionableFollowUps.length > 0 ? parsed.actionableFollowUps : fallback.actionableFollowUps,

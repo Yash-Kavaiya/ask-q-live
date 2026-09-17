@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QaStore } from './qa-store.js';
 import { timingSafeCompare, resolveAuth, sanitizeSeriesForPublic } from './auth.js';
-import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag } from './gemini.service.js';
+import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag, generatePostSessionReport } from './gemini.service.js';
 
 describe('Phase P0: Series Data Model, Store, & Auth', () => {
   let store: QaStore;
@@ -422,5 +422,22 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       expect(ans.firstLine).toContain('interactive Q&A');
       expect(ans.firstLine).not.toContain('does not explicitly address this detail');
     }, 15000);
+  });
+
+  describe('Phase P1: Single-Session Executive Report Accuracy', () => {
+    it('should generate a real, session-specific executive summary (not the generic fallback sentence)', async () => {
+      const report = await generatePostSessionReport(
+        'Edge AI Inference Deep-Dive',
+        'A technical session on running quantized LLMs on edge GPUs.',
+        [
+          { content: 'What quantization formats does the runtime support?', upvotes: 12, aiLine1: 'INT4 and INT8 are both supported.', category: 'Technical' },
+          { content: 'How does latency compare to cloud inference?', upvotes: 8, aiLine1: 'Edge inference cuts round-trip latency significantly.', category: 'Performance' },
+        ]
+      );
+
+      expect(report.executiveSummary).toBeTruthy();
+      expect(report.executiveSummary.length).toBeGreaterThan(20);
+      expect(report.executiveSummary).not.toBe('Real-time session synthesis completed across attendee inquiry streams and upvote momentum.');
+    });
   });
 });
