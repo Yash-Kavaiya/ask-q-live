@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { VoiceService } from '../services/voice.service';
@@ -8,7 +9,7 @@ import { FirebaseService } from '../services/firebase.service';
 @Component({
   selector: 'app-header',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, MatIconModule],
+  imports: [CommonModule, MatIconModule, RouterLink],
   template: `
     <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#E0E2EC] transition-all">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -57,10 +58,9 @@ import { FirebaseService } from '../services/firebase.service';
           @if (qaService.currentSession() || qaService.currentSeries()) {
             @if (qaService.isStaff()) {
               <nav class="hidden lg:flex items-center gap-1 bg-[#F1F3F4] p-1 rounded-xl text-sm font-medium border border-[#E0E2EC] overflow-x-auto scrollbar-none max-w-full">
-                <button
+                <a
                   id="nav-tab-feed"
-                  type="button"
-                  (click)="qaService.activeTab.set('feed')"
+                  [routerLink]="[navBase(), navCode(), 'feed']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'feed'"
                   [class.text-indigo-600]="qaService.activeTab() === 'feed'"
@@ -74,13 +74,12 @@ import { FirebaseService } from '../services/firebase.service';
                       {{ qaService.questions().length }}
                     </span>
                   }
-                </button>
+                </a>
 
                 <!-- Series Run of Show / Control Room -->
-                <button
+                <a
                   id="nav-tab-series-control"
-                  type="button"
-                  (click)="qaService.activeTab.set('series-control')"
+                  [routerLink]="[navBase(), navCode(), 'run-of-show']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'series-control'"
                   [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
@@ -94,12 +93,11 @@ import { FirebaseService } from '../services/firebase.service';
                       {{ qaService.segments().length }}
                     </span>
                   }
-                </button>
+                </a>
 
-                <button
+                <a
                   id="nav-tab-teleprompter"
-                  type="button"
-                  (click)="qaService.activeTab.set('teleprompter')"
+                  [routerLink]="[navBase(), navCode(), 'teleprompter']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'teleprompter'"
                   [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
@@ -108,12 +106,11 @@ import { FirebaseService } from '../services/firebase.service';
                 >
                   <mat-icon class="text-base">live_tv</mat-icon>
                   <span>Teleprompter</span>
-                </button>
+                </a>
 
-                <button
+                <a
                   id="nav-tab-analytics"
-                  type="button"
-                  (click)="qaService.activeTab.set('analytics')"
+                  [routerLink]="[navBase(), navCode(), 'analytics']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'analytics'"
                   [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
@@ -122,13 +119,12 @@ import { FirebaseService } from '../services/firebase.service';
                 >
                   <mat-icon class="text-base">insights</mat-icon>
                   <span>Analytics</span>
-                </button>
+                </a>
 
                 @if (qaService.isAdmin()) {
-                  <button
+                  <a
                     id="nav-tab-moderation"
-                    type="button"
-                    (click)="qaService.activeTab.set('moderation')"
+                    [routerLink]="[navBase(), navCode(), 'moderation']"
                     class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0"
                     [class.bg-white]="qaService.activeTab() === 'moderation'"
                     [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
@@ -140,12 +136,11 @@ import { FirebaseService } from '../services/firebase.service';
                     @if (qaService.pendingModerationQuestions().length > 0) {
                       <span class="w-2 h-2 rounded-full bg-[#D93025] animate-pulse"></span>
                     }
-                  </button>
+                  </a>
 
-                  <button
+                  <a
                     id="nav-tab-grounding"
-                    type="button"
-                    (click)="qaService.activeTab.set('grounding')"
+                    [routerLink]="[navBase(), navCode(), 'grounding']"
                     class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                     [class.bg-white]="qaService.activeTab() === 'grounding'"
                     [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
@@ -154,13 +149,12 @@ import { FirebaseService } from '../services/firebase.service';
                   >
                     <mat-icon class="text-base">auto_stories</mat-icon>
                     <span>Grounding</span>
-                  </button>
+                  </a>
                 }
 
-                <button
+                <a
                   id="nav-tab-report"
-                  type="button"
-                  (click)="qaService.activeTab.set('report')"
+                  [routerLink]="[navBase(), navCode(), 'report']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'report'"
                   [class.text-indigo-600]="qaService.activeTab() === 'report'"
@@ -169,7 +163,7 @@ import { FirebaseService } from '../services/firebase.service';
                 >
                   <mat-icon class="text-base">summarize</mat-icon>
                   <span>Report</span>
-                </button>
+                </a>
               </nav>
             } @else {
               <!-- Attendees only see Live Feed -->
@@ -293,10 +287,9 @@ import { FirebaseService } from '../services/firebase.service';
         <!-- Mobile Secondary Tab Bar (only for staff with multiple views) -->
         @if ((qaService.currentSession() || qaService.currentSeries()) && qaService.isStaff()) {
           <div class="flex lg:hidden overflow-x-auto py-2 gap-1.5 border-t border-[#E0E2EC] scrollbar-none text-xs">
-            <button
+            <a
               id="mob-tab-feed"
-              type="button"
-              (click)="qaService.activeTab.set('feed')"
+              [routerLink]="[navBase(), navCode(), 'feed']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'feed'"
               [class.text-white]="qaService.activeTab() === 'feed'"
@@ -305,12 +298,11 @@ import { FirebaseService } from '../services/firebase.service';
             >
               <mat-icon class="text-sm">question_answer</mat-icon>
               Feed ({{ qaService.questions().length }})
-            </button>
+            </a>
 
-            <button
+            <a
               id="mob-tab-series-control"
-              type="button"
-              (click)="qaService.activeTab.set('series-control')"
+              [routerLink]="[navBase(), navCode(), 'run-of-show']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'series-control'"
               [class.text-white]="qaService.activeTab() === 'series-control'"
@@ -319,12 +311,11 @@ import { FirebaseService } from '../services/firebase.service';
             >
               <mat-icon class="text-sm">view_timeline</mat-icon>
               Run of Show
-            </button>
+            </a>
 
-            <button
+            <a
               id="mob-tab-teleprompter"
-              type="button"
-              (click)="qaService.activeTab.set('teleprompter')"
+              [routerLink]="[navBase(), navCode(), 'teleprompter']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'teleprompter'"
               [class.text-white]="qaService.activeTab() === 'teleprompter'"
@@ -333,12 +324,11 @@ import { FirebaseService } from '../services/firebase.service';
             >
               <mat-icon class="text-sm">live_tv</mat-icon>
               Teleprompter
-            </button>
+            </a>
 
-            <button
+            <a
               id="mob-tab-analytics"
-              type="button"
-              (click)="qaService.activeTab.set('analytics')"
+              [routerLink]="[navBase(), navCode(), 'analytics']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'analytics'"
               [class.text-white]="qaService.activeTab() === 'analytics'"
@@ -347,13 +337,12 @@ import { FirebaseService } from '../services/firebase.service';
             >
               <mat-icon class="text-sm">insights</mat-icon>
               Analytics
-            </button>
+            </a>
 
             @if (qaService.isAdmin()) {
-              <button
+              <a
                 id="mob-tab-moderation"
-                type="button"
-                (click)="qaService.activeTab.set('moderation')"
+                [routerLink]="[navBase(), navCode(), 'moderation']"
                 class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
                 [class.bg-indigo-600]="qaService.activeTab() === 'moderation'"
                 [class.text-white]="qaService.activeTab() === 'moderation'"
@@ -362,13 +351,12 @@ import { FirebaseService } from '../services/firebase.service';
               >
                 <mat-icon class="text-sm">gavel</mat-icon>
                 Mod
-              </button>
+              </a>
             }
 
-            <button
+            <a
               id="mob-tab-report"
-              type="button"
-              (click)="qaService.activeTab.set('report')"
+              [routerLink]="[navBase(), navCode(), 'report']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'report'"
               [class.text-white]="qaService.activeTab() === 'report'"
@@ -377,7 +365,7 @@ import { FirebaseService } from '../services/firebase.service';
             >
               <mat-icon class="text-sm">summarize</mat-icon>
               Report
-            </button>
+            </a>
           </div>
         }
       </div>
@@ -389,6 +377,10 @@ export class Header {
   public voiceService = inject(VoiceService);
   public firebaseService = inject(FirebaseService);
   public isCodeCopied = signal<boolean>(false);
+  public navBase = computed(() => (this.qaService.currentSeries() ? '/series' : '/session'));
+  public navCode = computed(() =>
+    this.qaService.currentSession()?.joinCode || this.qaService.currentSeries()?.joinCode || ''
+  );
 
   public copyJoinCode(code: string): void {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
