@@ -179,12 +179,14 @@ export type WordCloudViewMode = 'cloud' | 'bubbles' | 'matrix';
             </span>
             <span
               class="text-xs font-semibold px-2 py-0.5 rounded-md"
-              [class.bg-[#E6F4EA]]="sentimentScore() >= 0.2"
-              [class.text-[#137333]]="sentimentScore() >= 0.2"
-              [class.bg-[#FEF7E0]]="sentimentScore() < 0.2 && sentimentScore() >= -0.2"
-              [class.text-[#B06000]]="sentimentScore() < 0.2 && sentimentScore() >= -0.2"
-              [class.bg-[#FCE8E6]]="sentimentScore() < -0.2"
-              [class.text-[#D93025]]="sentimentScore() < -0.2"
+              [class.bg-[#E6F4EA]]="sentimentTone() === 'positive'"
+              [class.text-[#137333]]="sentimentTone() === 'positive'"
+              [class.bg-[#FEF7E0]]="sentimentTone() === 'neutral'"
+              [class.text-[#B06000]]="sentimentTone() === 'neutral'"
+              [class.bg-[#FCE8E6]]="sentimentTone() === 'critical'"
+              [class.text-[#D93025]]="sentimentTone() === 'critical'"
+              [class.bg-[#F1F3F4]]="sentimentTone() === 'pending'"
+              [class.text-[#747775]]="sentimentTone() === 'pending'"
             >
               {{ sentimentLabel() }}
             </span>
@@ -1071,19 +1073,30 @@ export class WordCloudAnalytics implements AfterViewInit, OnDestroy {
   });
 
   public sentimentScore = computed(() => {
-    return this.telemetry()?.sentimentPolarity ?? 0.45;
+    return this.telemetry()?.sentimentPolarity ?? null;
   });
 
   public sentimentFormatted = computed(() => {
     const s = this.sentimentScore();
+    if (s === null) return '—';
     return (s > 0 ? '+' : '') + s.toFixed(2);
   });
 
-  public sentimentLabel = computed(() => {
+  public sentimentTone = computed<'positive' | 'neutral' | 'critical' | 'pending'>(() => {
     const s = this.sentimentScore();
-    if (s >= 0.2) return 'Positive';
-    if (s <= -0.2) return 'Critical';
-    return 'Neutral';
+    if (s === null) return 'pending';
+    if (s >= 0.2) return 'positive';
+    if (s <= -0.2) return 'critical';
+    return 'neutral';
+  });
+
+  public sentimentLabel = computed(() => {
+    switch (this.sentimentTone()) {
+      case 'positive': return 'Positive';
+      case 'critical': return 'Critical';
+      case 'pending': return 'Awaiting data';
+      default: return 'Neutral';
+    }
   });
 
   public activeWordDetail = computed(() => {
