@@ -946,7 +946,7 @@ git commit -m "feat: add role guards for staff/admin-only tabs and the host stud
 
 **Interfaces:**
 - Consumes: `sessionResolver` (Task 8), `staffTabGuard`/`adminTabGuard`/`organizerGuard` (Task 9), and the existing standalone components (`SessionJoin`, `AuthPage`, `HostStudio`, `QuestionFeed`, `SeriesControlRoom`, `Teleprompter`, `WordCloudAnalytics`, `ModerationQueue`, `GroundingContext`, `ExecutiveReport`)
-- Produces: `routes: Routes` matching the spec's route table (§3) — consumed by `provideRouter(routes)` in `app.config.ts` (already wired, no change needed there) and by Task 12's `<router-outlet>`
+- Produces: `routes: Routes` matching the spec's route table (§3) — consumed by `provideRouter(routes)` in `app.config.ts` (already wired, no change needed there) and by Task 13's `<router-outlet>`
 
 - [ ] **Step 1: Replace `app.routes.ts`**
 
@@ -1318,7 +1318,7 @@ with:
 - [ ] **Step 6: Verify it builds**
 
 Run: `npm run build`
-Expected: builds successfully. This is the last purely-structural task before the router-outlet actually renders anything (Task 12), so full behavioral verification happens there and in Task 15's Playwright run.
+Expected: builds successfully. This is the last purely-structural task before the router-outlet actually renders anything (Task 13), so full behavioral verification happens there and in Task 15's Playwright run.
 
 - [ ] **Step 7: Commit**
 
@@ -1329,7 +1329,114 @@ git commit -m "feat: derive currentView/activeTab from the router and sync sessi
 
 ---
 
-## Task 12: Switch `app.html`/`app.ts` to `<router-outlet>`, fold the series-lobby banner into the feed
+## Task 12: Convert header nav tabs to real links
+
+**Files:**
+- Modify: `src/app/components/header.ts:1-11` (imports)
+- Modify: `src/app/components/header.ts:56-186` (desktop nav)
+- Modify: `src/app/components/header.ts:293-382` (mobile tab bar)
+- Modify: `src/app/components/header.ts:387-403` (component class)
+
+**Interfaces:**
+- Consumes: `qaService.currentSession()`, `.currentSeries()`, `.activeTab()` (all pre-existing)
+- Produces: `Header.navBase`, `Header.navCode` computed signals (internal to this component, nothing else consumes them)
+
+- [ ] **Step 1: Import `RouterLink` and add the base-path computed signals**
+
+Replace the import block (lines 1-6):
+
+```ts
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MatIconModule } from '@angular/material/icon';
+import { QaService } from '../services/qa.service';
+import { VoiceService } from '../services/voice.service';
+import { FirebaseService } from '../services/firebase.service';
+```
+
+with:
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
+import { MatIconModule } from '@angular/material/icon';
+import { QaService } from '../services/qa.service';
+import { VoiceService } from '../services/voice.service';
+import { FirebaseService } from '../services/firebase.service';
+```
+
+Update the `imports` array (line 11):
+
+```ts
+  imports: [CommonModule, MatIconModule],
+```
+
+to:
+
+```ts
+  imports: [CommonModule, MatIconModule, RouterLink],
+```
+
+Add computed signals to the class body — insert right after `public isCodeCopied = signal<boolean>(false);` (line 391):
+
+```ts
+  public isCodeCopied = signal<boolean>(false);
+  public navBase = computed(() => (this.qaService.currentSeries() ? '/series' : '/session'));
+  public navCode = computed(() =>
+    this.qaService.currentSession()?.joinCode || this.qaService.currentSeries()?.joinCode || ''
+  );
+```
+
+- [ ] **Step 2: Convert the 7 desktop nav buttons to `<a [routerLink]>`**
+
+For each of the 7 desktop nav buttons, change the opening tag from `<button ... type="button" (click)="qaService.activeTab.set('X')" ...>` to `<a ... [routerLink]="[navBase(), navCode(), 'X']" ...>`, and the closing `</button>` to `</a>`. All other attributes (`id`, `class`, the `[class.x]` bindings) stay exactly as they are after Task 6's CSS fix. Concretely:
+
+`#nav-tab-feed` (was):
+```html
+                <button
+                  id="nav-tab-feed"
+                  type="button"
+                  (click)="qaService.activeTab.set('feed')"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+```
+becomes:
+```html
+                <a
+                  id="nav-tab-feed"
+                  [routerLink]="[navBase(), navCode(), 'feed']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+```
+(and its closing `</button>` → `</a>`)
+
+`#nav-tab-series-control` → `[routerLink]="[navBase(), navCode(), 'run-of-show']"`
+`#nav-tab-teleprompter` → `[routerLink]="[navBase(), navCode(), 'teleprompter']"`
+`#nav-tab-analytics` → `[routerLink]="[navBase(), navCode(), 'analytics']"`
+`#nav-tab-moderation` → `[routerLink]="[navBase(), navCode(), 'moderation']"`
+`#nav-tab-grounding` → `[routerLink]="[navBase(), navCode(), 'grounding']"`
+`#nav-tab-report` → `[routerLink]="[navBase(), navCode(), 'report']"`
+
+Each follows the identical pattern: drop `type="button"` and `(click)="qaService.activeTab.set('X')"`, add `[routerLink]="[navBase(), navCode(), '<path-segment>']"`, change tag name `button`→`a` on both open and close tags. The `[class.bg-white]="qaService.activeTab() === 'X'"` etc. bindings are untouched — they still work because `activeTab` is now URL-derived (Task 11), and `app.html` still uses the pre-router `@switch(activeTab())` at this point (Task 13 replaces it), so the visible content already tracks the URL correctly through this task.
+
+- [ ] **Step 3: Convert the 6 mobile tab bar buttons the same way**
+
+Same transformation for `#mob-tab-feed` (→ `'feed'`), `#mob-tab-series-control` (→ `'run-of-show'`), `#mob-tab-teleprompter` (→ `'teleprompter'`), `#mob-tab-analytics` (→ `'analytics'`), `#mob-tab-moderation` (→ `'moderation'`), `#mob-tab-report` (→ `'report'`).
+
+- [ ] **Step 4: Verify it builds**
+
+Run: `npm run build`
+Expected: builds. Manually re-run the Task 6 viewport check (1024-1280px) and additionally click through each tab, confirming the URL bar updates, the active-tab highlight still tracks correctly, and the content area still switches correctly (it's still driven by `app.html`'s pre-router `@switch`, reading the now-URL-derived `activeTab` signal).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/app/components/header.ts
+git commit -m "feat: make header nav tabs real links instead of click-only state changes"
+```
+
+---
+
+## Task 13: Switch `app.html`/`app.ts` to `<router-outlet>`, fold the series-lobby banner into the feed
 
 **Files:**
 - Modify: `src/app/app.ts`
@@ -1337,8 +1444,8 @@ git commit -m "feat: derive currentView/activeTab from the router and sync sessi
 - Modify: `src/app/components/question-feed.ts:1-12` (imports, template opening)
 
 **Interfaces:**
-- Consumes: `routes` (Task 10, via `provideRouter` already in `app.config.ts`); `SeriesLobby` component (pre-existing, `./series-lobby`, selector `app-series-lobby`)
-- Produces: working `<router-outlet>` rendering — this is the task where routing becomes visibly functional
+- Consumes: `routes` (Task 10, via `provideRouter` already in `app.config.ts`); `SeriesLobby` component (pre-existing, `./series-lobby`, selector `app-series-lobby`); header nav now uses `[routerLink]` (Task 12), so this task doesn't need to touch `header.ts`
+- Produces: working `<router-outlet>` rendering — this is the task where routing becomes visibly functional end-to-end
 
 - [ ] **Step 1: Simplify `app.ts` — the view components are now wired through `app.routes.ts`, not imported directly**
 
@@ -1570,113 +1677,6 @@ Run: `npm run build`, then `npm run dev` and manually visit `/`, join or create 
 ```bash
 git add src/app/app.ts src/app/app.html src/app/components/question-feed.ts
 git commit -m "feat: render views through router-outlet instead of a manual view switch"
-```
-
----
-
-## Task 13: Convert header nav tabs to real links
-
-**Files:**
-- Modify: `src/app/components/header.ts:1-11` (imports)
-- Modify: `src/app/components/header.ts:56-186` (desktop nav)
-- Modify: `src/app/components/header.ts:293-382` (mobile tab bar)
-- Modify: `src/app/components/header.ts:387-403` (component class)
-
-**Interfaces:**
-- Consumes: `qaService.currentSession()`, `.currentSeries()`, `.activeTab()` (all pre-existing)
-- Produces: `Header.navBase`, `Header.navCode` computed signals (internal to this component, nothing else consumes them)
-
-- [ ] **Step 1: Import `RouterLink` and add the base-path computed signals**
-
-Replace the import block (lines 1-6):
-
-```ts
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { MatIconModule } from '@angular/material/icon';
-import { QaService } from '../services/qa.service';
-import { VoiceService } from '../services/voice.service';
-import { FirebaseService } from '../services/firebase.service';
-```
-
-with:
-
-```ts
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
-import { MatIconModule } from '@angular/material/icon';
-import { QaService } from '../services/qa.service';
-import { VoiceService } from '../services/voice.service';
-import { FirebaseService } from '../services/firebase.service';
-```
-
-Update the `imports` array (line 11):
-
-```ts
-  imports: [CommonModule, MatIconModule],
-```
-
-to:
-
-```ts
-  imports: [CommonModule, MatIconModule, RouterLink],
-```
-
-Add computed signals to the class body — insert right after `public isCodeCopied = signal<boolean>(false);` (line 391):
-
-```ts
-  public isCodeCopied = signal<boolean>(false);
-  public navBase = computed(() => (this.qaService.currentSeries() ? '/series' : '/session'));
-  public navCode = computed(() =>
-    this.qaService.currentSession()?.joinCode || this.qaService.currentSeries()?.joinCode || ''
-  );
-```
-
-- [ ] **Step 2: Convert the 7 desktop nav buttons to `<a [routerLink]>`**
-
-For each of the 7 desktop nav buttons, change the opening tag from `<button ... type="button" (click)="qaService.activeTab.set('X')" ...>` to `<a ... [routerLink]="[navBase(), navCode(), 'X']" ...>`, and the closing `</button>` to `</a>`. All other attributes (`id`, `class`, the `[class.x]` bindings) stay exactly as they are after Task 6's CSS fix. Concretely:
-
-`#nav-tab-feed` (was):
-```html
-                <button
-                  id="nav-tab-feed"
-                  type="button"
-                  (click)="qaService.activeTab.set('feed')"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-```
-becomes:
-```html
-                <a
-                  id="nav-tab-feed"
-                  [routerLink]="[navBase(), navCode(), 'feed']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-```
-(and its closing `</button>` → `</a>`)
-
-`#nav-tab-series-control` → `[routerLink]="[navBase(), navCode(), 'run-of-show']"`
-`#nav-tab-teleprompter` → `[routerLink]="[navBase(), navCode(), 'teleprompter']"`
-`#nav-tab-analytics` → `[routerLink]="[navBase(), navCode(), 'analytics']"`
-`#nav-tab-moderation` → `[routerLink]="[navBase(), navCode(), 'moderation']"`
-`#nav-tab-grounding` → `[routerLink]="[navBase(), navCode(), 'grounding']"`
-`#nav-tab-report` → `[routerLink]="[navBase(), navCode(), 'report']"`
-
-Each follows the identical pattern: drop `type="button"` and `(click)="qaService.activeTab.set('X')"`, add `[routerLink]="[navBase(), navCode(), '<path-segment>']"`, change tag name `button`→`a` on both open and close tags. The `[class.bg-white]="qaService.activeTab() === 'X'"` etc. bindings are untouched — they still work because `activeTab` is now URL-derived (Task 11).
-
-- [ ] **Step 3: Convert the 6 mobile tab bar buttons the same way**
-
-Same transformation for `#mob-tab-feed` (→ `'feed'`), `#mob-tab-series-control` (→ `'run-of-show'`), `#mob-tab-teleprompter` (→ `'teleprompter'`), `#mob-tab-analytics` (→ `'analytics'`), `#mob-tab-moderation` (→ `'moderation'`), `#mob-tab-report` (→ `'report'`).
-
-- [ ] **Step 4: Verify it builds**
-
-Run: `npm run build`
-Expected: builds. Manually re-run the Task 6 viewport check (1024-1280px) and additionally click through each tab, confirming the URL bar updates and the active-tab highlight still tracks correctly.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/app/components/header.ts
-git commit -m "feat: make header nav tabs real links instead of click-only state changes"
 ```
 
 ---
