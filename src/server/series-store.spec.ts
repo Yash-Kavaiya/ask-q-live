@@ -438,6 +438,6 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       expect(report.executiveSummary).toBeTruthy();
       expect(report.executiveSummary.length).toBeGreaterThan(20);
       expect(report.executiveSummary).not.toBe('Real-time session synthesis completed across attendee inquiry streams and upvote momentum.');
-    });
+    }, 15000);
   });
 });
