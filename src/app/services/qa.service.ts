@@ -127,9 +127,12 @@ export class QaService {
       const isStaffMember = this.isStaff();
       const currentTab = this.activeTab();
       if (!isStaffMember && currentTab !== 'feed') {
-        const code = this.currentSession()?.joinCode || this.currentSeries()?.joinCode;
+        const session = this.currentSession();
+        const series = this.currentSeries();
+        const code = session?.joinCode || series?.joinCode;
         if (code) {
-          this.router.navigate([this.currentSeries() ? '/series' : '/session', code, 'feed']);
+          const isSeries = series?.joinCode === code;
+          this.router.navigate([isSeries ? '/series' : '/session', code, 'feed']);
         } else {
           this.activeTab.set('feed');
         }
@@ -139,16 +142,30 @@ export class QaService {
     // Push the URL forward to the canonical /session/:code or /series/:code form
     // whenever session state changes outside of a route navigation (join-by-code
     // form, host creating/re-entering a session, legacy ?code= auto-join).
+    //
+    // Signals are read unconditionally (before the getCurrentNavigation() guard)
+    // so this effect stays subscribed to currentSession/currentSeries even on a
+    // run where it bails early — Angular's effect() re-derives its dependency set
+    // from whichever signals were actually read on that run, so returning before
+    // any signal read would silently stop this effect from ever running again.
     effect(() => {
       const session = this.currentSession();
       const series = this.currentSeries();
       const code = session?.joinCode || series?.joinCode;
       if (!code) return;
 
+      // A navigation already in flight (e.g. the sessionResolver awaiting
+      // joinSession() on a fresh deep link) owns getting the URL to its final
+      // state. router.url doesn't update until that navigation resolves
+      // (default deferred urlUpdateStrategy), so acting here would race it and
+      // briefly detour through the wrong /session/:code URL. Let it finish.
+      if (this.router.getCurrentNavigation()) return;
+
+      const isSeries = series?.joinCode === code;
       const currentUrl = this.router.url.split('?')[0];
-      const expectedPrefix = `/${series ? 'series' : 'session'}/${code}`;
+      const expectedPrefix = `/${isSeries ? 'series' : 'session'}/${code}`;
       if (!currentUrl.startsWith(expectedPrefix)) {
-        this.router.navigate([series ? '/series' : '/session', code, 'feed']);
+        this.router.navigate([isSeries ? '/series' : '/session', code, 'feed'], { replaceUrl: true });
       }
     });
   }
@@ -696,12 +713,14 @@ export class QaService {
           questionCount: totalQ,
         });
 
-        // 7. Activate appropriate tab
-        if (record.type === 'series') {
-          this.activeTab.set('series-control');
-        } else {
-          this.activeTab.set('feed');
-        }
+        // 7. Activate appropriate tab (via the router, not a direct signal write —
+        // activeTab is router-derived; a direct .set() here would just get raced
+        // and overwritten by the next NavigationEnd/bridging-effect correction).
+        const isSeries = record.type === 'series';
+        this.router.navigate(
+          [isSeries ? '/series' : '/session', code, isSeries ? 'run-of-show' : 'feed'],
+          { replaceUrl: true },
+        );
 
         this.showToast(`Opened #${code} as Event Host. Session dashboard is ready.`);
         this.isLoading.set(false);
