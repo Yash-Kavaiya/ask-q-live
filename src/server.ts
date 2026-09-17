@@ -7,6 +7,7 @@ import {
 import express from 'express';
 import { join } from 'node:path';
 import { qaStore } from './server/qa-store.js';
+import { computeSessionMetrics } from './server/report-metrics.js';
 import {
   translateContent,
   generatePostSessionReport,
@@ -899,6 +900,7 @@ app.post('/api/sessions/:code/report', async (req, res) => {
       session.contextData || '',
       questions
     );
+    const metrics = computeSessionMetrics(questions);
 
     res.json({
       sessionTitle: session.title,
@@ -906,6 +908,7 @@ app.post('/api/sessions/:code/report', async (req, res) => {
       totalQuestions: questions.length,
       totalUpvotes: questions.reduce((acc, q) => acc + q.upvotes, 0),
       ...report,
+      ...metrics,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Report generation failed';

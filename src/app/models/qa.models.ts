@@ -296,6 +296,21 @@ export interface PostSessionReport {
   }[];
   actionableFollowUps: string[];
   markdownReport: string;
+  aiCoverageRatio?: number;
+  sentimentBreakdown?: {
+    positive: number;
+    neutral: number;
+    critical: number;
+    positivePct: number;
+    neutralPct: number;
+    criticalPct: number;
+  };
+  topQuestions?: {
+    id: string;
+    content: string;
+    authorName: string;
+    upvotes: number;
+  }[];
 }
 
 export interface SpeakerComparison {
