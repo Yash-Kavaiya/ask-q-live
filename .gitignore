@@ -15,6 +15,9 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Git worktrees (isolated workspaces for subagent-driven plan execution)
+.worktrees/
+
 # IDEs and editors
 .idea/
 .project
