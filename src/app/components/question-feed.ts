@@ -3,14 +3,20 @@ import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angula
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { QuestionCard } from './question-card';
+import { SeriesLobby } from './series-lobby';
 
 @Component({
   selector: 'app-question-feed',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, MatIconModule, QuestionCard],
+  imports: [ReactiveFormsModule, MatIconModule, QuestionCard, SeriesLobby],
   template: `
     <div class="space-y-6">
-      
+
+      <!-- Series Workshop Banner (only meaningful on the Feed tab, which is where this component lives) -->
+      @if (qaService.currentSeries()) {
+        <app-series-lobby />
+      }
+
       <!-- Live Spotlight Banner if a question is currently being answered -->
       @if (activeAnsweringQuestion(); as liveQ) {
         <div class="bg-gradient-to-r from-[#1A73E8] to-[#185ABC] rounded-2xl p-5 text-white shadow-md border border-[#D2E3FC]/30 flex items-start gap-4">

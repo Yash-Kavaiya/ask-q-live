@@ -37,77 +37,7 @@
 
   <!-- Main View Router -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-    @if (!qaService.currentSession() && !qaService.currentSeries()) {
-      @switch (qaService.currentView()) {
-        @case ('join') {
-          <app-session-join />
-        }
-        @case ('auth') {
-          <app-auth-page />
-        }
-        @case ('host-studio') {
-          <app-host-studio />
-        }
-      }
-    } @else {
-      <!-- Series Workshop Banner on top of Feed and Control view -->
-      @if (qaService.currentSeries() && qaService.activeTab() === 'feed') {
-        <div class="mb-6">
-          <app-series-lobby />
-        </div>
-      }
-
-      @switch (qaService.activeTab()) {
-        @case ('feed') {
-          <app-question-feed />
-        }
-        @case ('series-control') {
-          @if (qaService.isStaff()) {
-            <app-series-control-room />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @case ('analytics') {
-          @if (qaService.isStaff()) {
-            <app-word-cloud-analytics />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @case ('teleprompter') {
-          @if (qaService.isStaff()) {
-            <app-teleprompter />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @case ('moderation') {
-          @if (qaService.isAdmin()) {
-            <app-moderation-queue />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @case ('grounding') {
-          @if (qaService.isAdmin()) {
-            <app-grounding-context />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @case ('report') {
-          @if (qaService.isStaff()) {
-            <app-executive-report />
-          } @else {
-            <app-question-feed />
-          }
-        }
-        @default {
-          <app-question-feed />
-        }
-      }
-    }
+    <router-outlet />
   </main>
 
   <!-- Footer -->
