@@ -18,6 +18,9 @@ yarn-error.log
 # Git worktrees (isolated workspaces for subagent-driven plan execution)
 .worktrees/
 
+# Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
+.superpowers/
+
 # IDEs and editors
 .idea/
 .project
