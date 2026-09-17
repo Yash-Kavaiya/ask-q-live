@@ -21,7 +21,9 @@ import {
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
-const angularApp = new AngularNodeAppEngine();
+const angularApp = new AngularNodeAppEngine({
+  allowedHosts: ['localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0'],
+});
 
 // Helper to safely extract string params without index signature or array issues
 function getCode(req: express.Request): string {

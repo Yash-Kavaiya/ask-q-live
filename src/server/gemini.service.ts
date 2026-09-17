@@ -75,7 +75,7 @@ async function callGeminiWithFailover(options: {
     throw new Error('GEMINI_API_KEY is not configured or is a placeholder');
   }
 
-  const models = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < models.length; attempt++) {
@@ -107,8 +107,17 @@ async function callGeminiWithFailover(options: {
     } catch (err: unknown) {
       lastError = err;
       const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
-      if (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT') || errorMsg.includes('API_KEY_INVALID')) {
-        throw new Error('Invalid GEMINI_API_KEY provided');
+      if (
+        errorMsg.includes('API key not valid') ||
+        errorMsg.includes('INVALID_ARGUMENT') ||
+        errorMsg.includes('API_KEY_INVALID') ||
+        errorMsg.includes('429') ||
+        errorMsg.includes('quota') ||
+        errorMsg.includes('RESOURCE_EXHAUSTED') ||
+        errorMsg.includes('503') ||
+        errorMsg.includes('high demand')
+      ) {
+        throw err;
       }
       // Brief jitter before next attempt
       await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
@@ -496,24 +505,24 @@ export async function callGeminiEmbeddings(texts: string[]): Promise<number[][]>
     return texts.map(t => generateDeterministicEmbedding(t));
   }
 
-  const embeddingModels = ['text-embedding-004', 'gemini-embedding-exp-03-07', 'embedding-001'];
+  const embeddingModels = ['gemini-embedding-2', 'gemini-embedding-001', 'text-embedding-004'];
 
   for (const model of embeddingModels) {
     try {
       const cleaned = texts.map(t => t.trim().slice(0, 2048));
-      const response = await ai.models.embedContent({
-        model,
-        contents: cleaned,
+      const responses = await Promise.all(
+        cleaned.map(text => ai.models.embedContent({ model, contents: text }))
+      );
+
+      const results = responses.map((res, idx) => {
+        if (res && res.embeddings && res.embeddings[0] && res.embeddings[0].values && res.embeddings[0].values.length > 0) {
+          return res.embeddings[0].values;
+        }
+        return generateDeterministicEmbedding(cleaned[idx]);
       });
 
-      if (response && response.embeddings && response.embeddings.length > 0) {
-        return response.embeddings.map((e, idx) =>
-          e.values && e.values.length > 0 ? e.values : generateDeterministicEmbedding(cleaned[idx])
-        );
-      }
-
-      if (response && (response as unknown as { embedding?: { values?: number[] } }).embedding?.values) {
-        return [(response as unknown as { embedding: { values: number[] } }).embedding.values!];
+      if (results.length > 0) {
+        return results;
       }
     } catch {
       // Try next candidate

@@ -325,7 +325,11 @@ async function runSuite() {
         'How does Gemini Embedding 2 perform semantic clustering in real-time on live audience questions?'
       );
       await attendeePage.click('#btn-submit-question');
-      await attendeePage.waitForTimeout(600);
+      await attendeePage.waitForFunction(() => {
+        const input = document.querySelector('#input-question-content');
+        return input && input.value === '';
+      }, { timeout: 15000 });
+      await attendeePage.waitForTimeout(400);
       recordPass('Attendee submitted Question 1 (Named inquiry)');
 
       // Attendee submits Question 2 (Anonymous)
@@ -335,7 +339,11 @@ async function runSuite() {
       );
       await attendeePage.check('#check-anonymous');
       await attendeePage.click('#btn-submit-question');
-      await attendeePage.waitForTimeout(600);
+      await attendeePage.waitForFunction(() => {
+        const input = document.querySelector('#input-question-content');
+        return input && input.value === '';
+      }, { timeout: 15000 });
+      await attendeePage.waitForTimeout(400);
       recordPass('Attendee submitted Question 2 (Anonymous inquiry)');
 
       // Refresh host feed to see questions

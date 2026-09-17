@@ -246,7 +246,7 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       });
       expect(sixth.error).toBeDefined();
       expect(sixth.error).toContain('velocity limit reached');
-    });
+    }, 30000);
 
     it('should track series-wide participant registration and bans', () => {
       const fp = 'user-fp-99';
@@ -296,13 +296,16 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       });
 
       expect(res.question).toBeDefined();
-      // Wait briefly for async AI generation to resolve
-      await new Promise(resolve => setTimeout(resolve, 50));
-      const q = store.getQuestions('NEXT26').find(item => item.id === res.question?.id);
+      // Wait for async AI generation to resolve
+      let q = store.getQuestions('NEXT26').find(item => item.id === res.question?.id);
+      for (let attempt = 0; attempt < 25 && (q?.isGroundedOnDeck === undefined || !q?.aiLine1); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        q = store.getQuestions('NEXT26').find(item => item.id === res.question?.id);
+      }
       expect(q).toBeDefined();
       expect(q?.isGroundedOnDeck).toBe(true);
       expect(q?.aiLine1).not.toBe('Real-time response processed based on active presentation stream.');
-    });
+    }, 15000);
 
     it('should set isGroundedOnDeck false when submitting to a segment without deck context', async () => {
       // Create a series without any deck/grounding context
@@ -324,12 +327,16 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       });
 
       expect(res.question).toBeDefined();
-      await new Promise(resolve => setTimeout(resolve, 50));
-      const q = store.getQuestions(emptySeries.seriesCode).find(item => item.id === res.question?.id);
-      expect(q).toBeDefined();
-      expect(q?.isGroundedOnDeck).toBe(false);
-      expect(q?.aiLine1).not.toBe('Real-time response processed based on active presentation stream.');
-    });
+      // Wait for async AI generation to resolve
+      let emptyQ = store.getQuestions(emptySeries.seriesCode).find(item => item.id === res.question?.id);
+      for (let attempt = 0; attempt < 25 && (emptyQ?.isGroundedOnDeck === undefined || !emptyQ?.aiLine1); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        emptyQ = store.getQuestions(emptySeries.seriesCode).find(item => item.id === res.question?.id);
+      }
+      expect(emptyQ).toBeDefined();
+      expect(emptyQ?.isGroundedOnDeck).toBe(false);
+      expect(emptyQ?.aiLine1).not.toBe('Real-time response processed based on active presentation stream.');
+    }, 15000);
 
     it('should chunk deck content into semantic sections for vector indexing', () => {
       const deckText = `
@@ -386,7 +393,7 @@ Our database layer uses Cloud Spanner and Redis clusters with 99.999% availabili
       expect(typeof ans.topSimilarity).toBe('number');
       expect(ans.firstLine).toBeTruthy();
       expect(ans.secondLine).toBeTruthy();
-    });
+    }, 15000);
 
     it('should answer "WHICH TOPIC IS THIS SESSION" with an expert grounded answer without boilerplate cop-outs', async () => {
       const deck = `Session Title: Next-Gen Autonomous AI Agents on Google Cloud
@@ -407,13 +414,13 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       expect(ans.firstLine).toContain('Next-Gen Autonomous AI Agents on Google Cloud');
       expect(ans.firstLine).not.toContain('does not explicitly address this detail');
       expect(ans.secondLine).not.toContain('Consult the session presenter');
-    });
+    }, 15000);
 
     it('should provide substantive expert fallback when attendee asks about topic on session without deck', async () => {
       const ans = await generateTwoLineAnswer('Which topic is this session?', undefined);
       expect(ans.isGroundedOnDeck).toBe(false);
       expect(ans.firstLine).toContain('interactive Q&A');
       expect(ans.firstLine).not.toContain('does not explicitly address this detail');
-    });
+    }, 15000);
   });
 });
