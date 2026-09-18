@@ -671,6 +671,47 @@ async function runSuite() {
     }
 
     // ------------------------------------------------------------------------
+    // FEATURE 13B: URL-Synced Navigation (Deep Links, Back Button, Refresh)
+    // ------------------------------------------------------------------------
+    console.log(`\n${c.bold}[Feature 13B] URL-Synced Navigation${c.reset}`);
+    try {
+      // Deep link straight to Analytics without clicking through tabs first
+      await hostPage.goto(`${BASE_URL}/session/${KEYNOTE_CODE}/analytics`, { waitUntil: 'domcontentloaded' });
+      await hostPage.waitForSelector('app-word-cloud-analytics', { timeout: 10000 });
+      recordPass('Direct deep link to /session/:code/analytics renders the Analytics tab');
+
+      // Deep link straight to the Executive Report
+      await hostPage.goto(`${BASE_URL}/session/${KEYNOTE_CODE}/report`, { waitUntil: 'domcontentloaded' });
+      await hostPage.waitForSelector('app-executive-report', { timeout: 10000 });
+      recordPass('Direct deep link to /session/:code/report renders the Executive Report tab');
+
+      // Browser back button steps back through tab history
+      await hostPage.click('#nav-tab-feed');
+      await hostPage.waitForSelector('app-question-feed', { timeout: 10000 });
+      await hostPage.goBack();
+      await hostPage.waitForSelector('app-executive-report', { timeout: 10000 });
+      recordPass('Browser back button returns to the previous tab (Report)');
+
+      // Refresh on a non-feed tab stays on that tab instead of dropping to Feed
+      await hostPage.click('#nav-tab-analytics');
+      await hostPage.waitForSelector('app-word-cloud-analytics', { timeout: 10000 });
+      await hostPage.reload({ waitUntil: 'domcontentloaded' });
+      await hostPage.waitForSelector('app-word-cloud-analytics', { timeout: 10000 });
+      recordPass('Refreshing on the Analytics tab stays on Analytics (URL-synced state survives reload)');
+
+      // Legacy ?code= link still lands in the session and upgrades the URL bar
+      await hostPage.goto(`${BASE_URL}/?code=${KEYNOTE_CODE}`, { waitUntil: 'domcontentloaded' });
+      await hostPage.waitForSelector('app-question-feed', { timeout: 15000 });
+      const legacyUrl = hostPage.url();
+      if (!legacyUrl.includes(`/session/${KEYNOTE_CODE}`)) {
+        throw new Error(`Legacy ?code= link did not upgrade to canonical URL, got: ${legacyUrl}`);
+      }
+      recordPass('Legacy ?code= link still auto-joins and upgrades to the canonical /session/:code URL', legacyUrl);
+    } catch (err) {
+      recordFail('Feature 13B: URL-Synced Navigation', err);
+    }
+
+    // ------------------------------------------------------------------------
     // FEATURE 14: Multi-Speaker Workshop Series & Run of Show
     // ------------------------------------------------------------------------
     console.log(`\n${c.bold}[Feature 14] Multi-Speaker Workshop Series & Run of Show${c.reset}`);

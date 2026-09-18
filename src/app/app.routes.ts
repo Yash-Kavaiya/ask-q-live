@@ -9,8 +9,7 @@ import { WordCloudAnalytics } from './components/word-cloud-analytics';
 import { ModerationQueue } from './components/moderation-queue';
 import { GroundingContext } from './components/grounding-context';
 import { ExecutiveReport } from './components/executive-report';
-import { sessionResolver } from './resolvers/session.resolver';
-import { staffTabGuard, adminTabGuard, organizerGuard } from './guards/session.guards';
+import { staffTabGuard, adminTabGuard, organizerGuard, sessionGuard } from './guards/session.guards';
 
 const sessionChildRoutes: Routes = [
   { path: '', redirectTo: 'feed', pathMatch: 'full' },
@@ -27,7 +26,7 @@ export const routes: Routes = [
   { path: '', component: SessionJoin },
   { path: 'auth', component: AuthPage },
   { path: 'host', component: HostStudio, canActivate: [organizerGuard] },
-  { path: 'session/:code', resolve: { sessionLoaded: sessionResolver }, children: sessionChildRoutes },
-  { path: 'series/:code', resolve: { sessionLoaded: sessionResolver }, children: sessionChildRoutes },
+  { path: 'session/:code', canActivateChild: [sessionGuard], children: sessionChildRoutes },
+  { path: 'series/:code', canActivateChild: [sessionGuard], children: sessionChildRoutes },
   { path: '**', redirectTo: '' },
 ];
