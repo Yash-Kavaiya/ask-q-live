@@ -30,6 +30,7 @@ import {
 } from './gemini.service.js';
 
 import { timingSafeCompare } from './auth.js';
+import { QaRepository } from './qa-repository.js';
 
 function normalizeSeriesGeminiKey(raw?: string | null): string | undefined {
   const key = (raw || '').trim();
@@ -105,12 +106,11 @@ const STOP_WORDS = new Set([
 const UNAMBIGUOUS_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export class QaStore {
-  private sessions = new Map<string, Session>(); // joinCode -> Session
+  private repo = new QaRepository();
   private series = new Map<string, Series>(); // seriesCode -> Series
   private questions = new Map<string, Question>(); // questionId -> Question
   private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
   private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
-  private participants = new Map<string, Map<string, Participant>>(); // joinCode -> (fingerprint -> Participant)
   private seriesParticipants = new Map<string, Map<string, SeriesParticipant>>(); // seriesCode -> (fingerprint -> SeriesParticipant)
   private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
   private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
@@ -125,7 +125,7 @@ export class QaStore {
   public isCodeAvailable(code: string): boolean {
     const clean = code.toUpperCase().trim().replace(/[^A-Z0-9_-]/g, '');
     if (!clean || clean.length < 3) return false;
-    return !this.sessions.has(clean) && !this.series.has(clean);
+    return !this.repo.hasSession(clean) && !this.series.has(clean);
   }
 
   /**
@@ -144,7 +144,7 @@ export class QaStore {
         code = (prefix + code).substring(0, 12);
       }
       attempts++;
-    } while ((this.sessions.has(code) || this.series.has(code)) && attempts < 100);
+    } while ((this.repo.hasSession(code) || this.series.has(code)) && attempts < 100);
     return code;
   }
 
@@ -220,7 +220,7 @@ export class QaStore {
     if (liveSeries) {
       return { series: liveSeries };
     }
-    const allSessions = Array.from(this.sessions.values());
+    const allSessions = this.repo.listSessions();
     const liveSession = allSessions.find(s => s.isActive) || allSessions[0];
     if (liveSession) {
       return { session: liveSession };
@@ -253,7 +253,7 @@ export class QaStore {
       .replace(/[^A-Z0-9_-]/g, '');
 
     if (seriesCode) {
-      if (this.series.has(seriesCode) || this.sessions.has(seriesCode)) {
+      if (this.series.has(seriesCode) || this.repo.hasSession(seriesCode)) {
         throw new Error(`Custom room code "${seriesCode}" is already in use by another session or workshop. Please choose a different code or use auto-generation.`);
       }
     } else {
@@ -393,7 +393,7 @@ export class QaStore {
           maxQuestionsPerMinute: defaultSettings.maxQuestionsPerMinute,
         },
       };
-      this.sessions.set(backingJoinCode, backingSession);
+      this.repo.setSession(backingJoinCode, backingSession);
       this.sessionQuestions.set(backingJoinCode, []);
     });
 
@@ -424,7 +424,6 @@ export class QaStore {
 
     this.series.set(seriesCode, newSeries);
     this.sessionQuestions.set(seriesCode, []);
-    this.participants.set(seriesCode, new Map());
     this.seriesParticipants.set(seriesCode, new Map());
     this.auditLogs.set(seriesCode, []);
 
@@ -449,7 +448,7 @@ export class QaStore {
         maxQuestionsPerMinute: defaultSettings.maxQuestionsPerMinute,
       },
     };
-    this.sessions.set(seriesCode, rootSession);
+    this.repo.setSession(seriesCode, rootSession);
 
     this.logAudit({
       seriesId,
@@ -599,7 +598,7 @@ export class QaStore {
         maxQuestionsPerMinute: series.settings.maxQuestionsPerMinute,
       },
     };
-    this.sessions.set(backingJoinCode, backingSession);
+    this.repo.setSession(backingJoinCode, backingSession);
     this.sessionQuestions.set(backingJoinCode, []);
 
     this.logAudit({
@@ -663,7 +662,7 @@ export class QaStore {
 
         // Update backing session
         const backingCode = `${code}-S${seg.order}`;
-        const backingSess = this.sessions.get(backingCode);
+        const backingSess = this.repo.getSession(backingCode);
         if (backingSess) {
           backingSess.state = 'ENDED';
           backingSess.actualEnd = nowIso;
@@ -697,7 +696,7 @@ export class QaStore {
 
     // Sync backing session
     const targetBackingCode = `${code}-S${targetSeg.order}`;
-    const targetBackingSess = this.sessions.get(targetBackingCode);
+    const targetBackingSess = this.repo.getSession(targetBackingCode);
     if (targetBackingSess) {
       targetBackingSess.state = 'LIVE';
       targetBackingSess.isActive = true;
@@ -768,7 +767,7 @@ export class QaStore {
 
     // Sync backing session
     const backingCode = `${code}-S${targetSeg.order}`;
-    const backingSess = this.sessions.get(backingCode);
+    const backingSess = this.repo.getSession(backingCode);
     if (backingSess) {
       backingSess.state = 'ENDED';
       backingSess.actualEnd = nowIso;
@@ -1463,20 +1462,19 @@ export class QaStore {
     }
 
     // 2. Update legacy session participant
-    const partMap = this.participants.get(code);
-    if (partMap) {
-      let p = partMap.get(fingerprint);
-      if (!p) {
-        p = this.registerParticipant(code, fingerprint, name || 'Participant');
-      }
+    let p = this.repo.getParticipant(code, fingerprint);
+    if (!p) {
+      p = this.registerParticipant(code, fingerprint, name || 'Participant');
+    } else {
       p.questionCount++;
+      this.repo.setParticipant(code, fingerprint, p);
     }
   }
 
   public isParticipantBanned(code: string, fingerprint: string): boolean {
     const sPart = this.seriesParticipants.get(code.toUpperCase())?.get(fingerprint);
     if (sPart?.isBanned) return true;
-    const sessPart = this.participants.get(code.toUpperCase())?.get(fingerprint);
+    const sessPart = this.repo.getParticipant(code.toUpperCase(), fingerprint);
     return sessPart?.isBanned || false;
   }
 
@@ -1500,9 +1498,10 @@ export class QaStore {
     }
 
     // Session level ban
-    const sessPart = this.participants.get(code)?.get(fingerprint);
+    const sessPart = this.repo.getParticipant(code, fingerprint);
     if (sessPart) {
       sessPart.isBanned = banned;
+      this.repo.setParticipant(code, fingerprint, sessPart);
       updated = true;
     }
 
@@ -1831,7 +1830,7 @@ export class QaStore {
       approvedQuestions: approved,
       flaggedQuestions: flagged,
       answeredQuestions: answered,
-      activeParticipants: this.participants.get(joinCode.toUpperCase())?.size || 0,
+      activeParticipants: this.repo.countParticipants(joinCode.toUpperCase()),
     };
   }
 
@@ -2133,7 +2132,7 @@ export class QaStore {
 
   public ensureRootSessionForSeries(seriesCode: string): Session | undefined {
     const code = seriesCode.toUpperCase();
-    const existing = this.sessions.get(code);
+    const existing = this.repo.getSession(code);
     if (existing) return existing;
     const series = this.series.get(code);
     if (!series) return undefined;
@@ -2158,7 +2157,7 @@ export class QaStore {
         maxQuestionsPerMinute: series.settings?.maxQuestionsPerMinute || 5,
       },
     };
-    this.sessions.set(code, rootSession);
+    this.repo.setSession(code, rootSession);
     if (!this.sessionQuestions.has(code)) {
       this.sessionQuestions.set(code, []);
     }
@@ -2166,7 +2165,7 @@ export class QaStore {
   }
 
   public getSession(joinCode: string): Session | undefined {
-    return this.sessions.get(joinCode.toUpperCase());
+    return this.repo.getSession(joinCode.toUpperCase());
   }
 
   public createSession(params: {
@@ -2184,7 +2183,7 @@ export class QaStore {
       .replace(/[^A-Z0-9_-]/g, '');
 
     if (joinCode) {
-      if (this.sessions.has(joinCode) || this.series.has(joinCode)) {
+      if (this.repo.hasSession(joinCode) || this.series.has(joinCode)) {
         throw new Error(`Custom room code "${joinCode}" is already in use by another session or workshop. Please choose a different code or use auto-generation.`);
       }
     } else {
@@ -2211,9 +2210,8 @@ export class QaStore {
       },
     };
 
-    this.sessions.set(joinCode, session);
+    this.repo.setSession(joinCode, session);
     this.sessionQuestions.set(joinCode, []);
-    this.participants.set(joinCode, new Map());
 
     return session;
   }
@@ -2250,11 +2248,7 @@ export class QaStore {
     name: string
   ): Participant {
     const code = joinCode.toUpperCase();
-    if (!this.participants.has(code)) {
-      this.participants.set(code, new Map());
-    }
-    const sessionPartMap = this.participants.get(code)!;
-    let participant = sessionPartMap.get(fingerprint);
+    let participant = this.repo.getParticipant(code, fingerprint);
     if (!participant) {
       participant = {
         clientFingerprint: fingerprint,
@@ -2263,17 +2257,17 @@ export class QaStore {
         joinedAt: new Date().toISOString(),
         questionCount: 0,
       };
-      sessionPartMap.set(fingerprint, participant);
+      this.repo.setParticipant(code, fingerprint, participant);
     } else if (name && participant.name !== name) {
       participant.name = name;
+      this.repo.setParticipant(code, fingerprint, participant);
     }
     return participant;
   }
 
   public getParticipants(joinCode: string): Participant[] {
     const code = joinCode.toUpperCase();
-    const map = this.participants.get(code);
-    return map ? Array.from(map.values()) : [];
+    return this.repo.listParticipants(code);
   }
 
   /**
@@ -2480,7 +2474,6 @@ export class QaStore {
 
     this.series.set(defaultCode, seriesNext26);
     this.sessionQuestions.set(defaultCode, []);
-    this.participants.set(defaultCode, new Map());
     this.seriesParticipants.set(defaultCode, new Map());
     this.auditLogs.set(defaultCode, []);
 
@@ -2505,7 +2498,7 @@ export class QaStore {
         maxQuestionsPerMinute: 5,
       },
     };
-    this.sessions.set(defaultCode, keynoteSession);
+    this.repo.setSession(defaultCode, keynoteSession);
 
     // Also register backing sessions for each segment
     segments.forEach((seg, idx) => {
@@ -2537,7 +2530,7 @@ export class QaStore {
           maxQuestionsPerMinute: 5,
         },
       };
-      this.sessions.set(backingCode, backingSession);
+      this.repo.setSession(backingCode, backingSession);
       this.sessionQuestions.set(backingCode, []);
     });
 
@@ -2821,7 +2814,6 @@ export class QaStore {
 
     this.series.set(nvidiaCode, seriesNvidia);
     this.sessionQuestions.set(nvidiaCode, []);
-    this.participants.set(nvidiaCode, new Map());
     this.seriesParticipants.set(nvidiaCode, new Map());
     this.auditLogs.set(nvidiaCode, []);
 
@@ -2845,7 +2837,7 @@ export class QaStore {
         maxQuestionsPerMinute: 5,
       },
     };
-    this.sessions.set(nvidiaCode, keynoteNvidiaSession);
+    this.repo.setSession(nvidiaCode, keynoteNvidiaSession);
 
     nvidiaSegments.forEach((seg, idx) => {
       const backingCode = `${nvidiaCode}-S${idx + 1}`;
@@ -2876,7 +2868,7 @@ export class QaStore {
           maxQuestionsPerMinute: 5,
         },
       };
-      this.sessions.set(backingCode, backingSession);
+      this.repo.setSession(backingCode, backingSession);
       this.sessionQuestions.set(backingCode, []);
     });
 
@@ -3119,7 +3111,6 @@ export class QaStore {
 
     this.series.set(gdgCode, seriesGdgLive);
     this.sessionQuestions.set(gdgCode, []);
-    this.participants.set(gdgCode, new Map());
     this.seriesParticipants.set(gdgCode, new Map());
     this.auditLogs.set(gdgCode, []);
 
@@ -3143,7 +3134,7 @@ export class QaStore {
         maxQuestionsPerMinute: 5,
       },
     };
-    this.sessions.set(gdgCode, keynoteGdgSession);
+    this.repo.setSession(gdgCode, keynoteGdgSession);
 
     gdgSegments.forEach((seg, idx) => {
       const backingCode = `${gdgCode}-S${idx + 1}`;
@@ -3180,7 +3171,7 @@ export class QaStore {
           maxQuestionsPerMinute: 5,
         },
       };
-      this.sessions.set(backingCode, backingSession);
+      this.repo.setSession(backingCode, backingSession);
       this.sessionQuestions.set(backingCode, []);
     });
 
