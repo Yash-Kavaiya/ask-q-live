@@ -241,6 +241,10 @@ export function fromFirestoreSegment(
     categories: Array.isArray(data.categories) && data.categories.length ? data.categories : ['General'],
     order: typeof data.order === 'number' ? data.order : 0,
     graceWindowMinutes: data.graceWindowMinutes ?? 5,
+    // Firestore's segment doc deliberately never carries adminToken (it's
+    // publicly readable — see firestore.rules) — callers that need the real
+    // token already merge it back in from a privileged source afterward.
+    adminToken: '',
     sessionDescription: sessionDescription || undefined,
     topicSummary: clean(data.topicSummary) || sessionDescription || undefined,
     speaker: speakerParts.nested,
