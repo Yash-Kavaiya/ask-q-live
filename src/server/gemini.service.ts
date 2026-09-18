@@ -12,9 +12,29 @@ try {
   // Ignored if .env file does not exist
 }
 
-function getAiClient(): GoogleGenAI | null {
+function resolveEnvGeminiKey(): string {
   const rawKey = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['API_KEY'];
-  const apiKey = rawKey ? rawKey.trim() : '';
+  return rawKey ? rawKey.trim() : '';
+}
+
+/** Prefer host-provided key when valid; otherwise platform env key. */
+export function resolveGeminiApiKey(overrideKey?: string | null): string {
+  const hostKey = (overrideKey || '').trim();
+  if (
+    hostKey &&
+    hostKey.length >= 10 &&
+    hostKey !== 'MY_GEMINI_API_KEY' &&
+    hostKey !== 'TODO' &&
+    hostKey !== 'undefined' &&
+    hostKey !== 'null'
+  ) {
+    return hostKey;
+  }
+  return resolveEnvGeminiKey();
+}
+
+function getAiClient(overrideKey?: string | null): GoogleGenAI | null {
+  const apiKey = resolveGeminiApiKey(overrideKey);
 
   // Check for missing or placeholder API key
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'TODO' || apiKey === 'undefined' || apiKey === 'null' || apiKey.length < 10) {
@@ -69,8 +89,9 @@ async function callGeminiWithFailover(options: {
   responseMimeType?: string;
   responseSchema?: unknown;
   temperature?: number;
+  apiKey?: string | null;
 }): Promise<string> {
-  const ai = getAiClient();
+  const ai = getAiClient(options.apiKey);
   if (!ai) {
     throw new Error('GEMINI_API_KEY is not configured or is a placeholder');
   }
@@ -497,10 +518,13 @@ export function chunkTextForRag(text: string, maxChunkChars = 500): string[] {
  * Executes Gemini embedding requests using text-embedding-004 (Gemini Embedding 2)
  * with multi-model failover and offline semantic fallback.
  */
-export async function callGeminiEmbeddings(texts: string[]): Promise<number[][]> {
+export async function callGeminiEmbeddings(
+  texts: string[],
+  apiKey?: string | null
+): Promise<number[][]> {
   if (!texts || texts.length === 0) return [];
 
-  const ai = getAiClient();
+  const ai = getAiClient(apiKey);
   if (!ai) {
     return texts.map(t => generateDeterministicEmbedding(t));
   }
@@ -539,7 +563,8 @@ export async function callGeminiEmbeddings(texts: string[]): Promise<number[][]>
 export async function performEmbeddingRag(
   question: string,
   deckContext: string | string[],
-  topK = 3
+  topK = 3,
+  apiKey?: string | null
 ): Promise<{
   retrievedChunks: string[];
   topSimilarity: number;
@@ -574,7 +599,7 @@ export async function performEmbeddingRag(
 
   try {
     const allTexts = [question, ...chunks];
-    const embeddings = await callGeminiEmbeddings(allTexts);
+    const embeddings = await callGeminiEmbeddings(allTexts, apiKey);
     const questionEmbedding = embeddings[0];
     const chunkEmbeddings = embeddings.slice(1);
 
@@ -619,8 +644,10 @@ export async function performEmbeddingRag(
  */
 export async function generateTwoLineAnswer(
   questionText: string,
-  sessionContext?: string
+  sessionContext?: string,
+  options?: { apiKey?: string | null }
 ): Promise<AnswerResponse> {
+  const apiKey = options?.apiKey;
   const cleanContext = (sessionContext || '')
     .replace(/General workshop inquiries and event logistics\./gi, '')
     .trim();
@@ -635,7 +662,7 @@ export async function generateTwoLineAnswer(
 
   let ragResult: { retrievedChunks: string[]; topSimilarity: number; ragContext: string; model: string } | null = null;
   if (hasDeck) {
-    ragResult = await performEmbeddingRag(questionText, cleanContext);
+    ragResult = await performEmbeddingRag(questionText, cleanContext, 3, apiKey);
   }
 
   const contextBlock = hasDeck && ragResult
@@ -689,6 +716,7 @@ EXPERT INSTRUCTIONS (Generic Technical Knowledge - No Slides Attached):
     const rawResponse = await callGeminiWithFailover({
       prompt,
       temperature: hasDeck ? 0.2 : 0.3,
+      apiKey,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -899,7 +927,8 @@ export async function translateContent(
 export async function generatePostSessionReport(
   sessionTitle: string,
   sessionContext: string,
-  questions: { content: string; upvotes: number; aiLine1?: string; aiLine2?: string; category?: string; status?: string }[]
+  questions: { content: string; upvotes: number; aiLine1?: string; aiLine2?: string; category?: string; status?: string }[],
+  apiKey?: string | null
 ): Promise<{
   executiveSummary: string;
   topThemes: { title: string; description: string; questionExamples: string[] }[];
@@ -971,6 +1000,7 @@ Synthesize a comprehensive, executive post-session intelligence report containin
     const rawResponse = await callGeminiWithFailover({
       prompt,
       temperature: 0.2,
+      apiKey,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -1044,7 +1074,8 @@ export async function generateSeriesExecutiveReport(
     upvotes: number;
     answeredCount: number;
     questions: { content: string; upvotes: number; status: string }[];
-  }[]
+  }[],
+  apiKey?: string | null
 ): Promise<{
   executiveSummary: string;
   crossCuttingThemes: { title: string; description: string; questionExamples: string[] }[];
@@ -1122,6 +1153,7 @@ ${speakers.map(s => `| ${s.speakerName} | ${s.talkTitle} | ${s.questionCount} | 
     const rawResponse = await callGeminiWithFailover({
       prompt,
       temperature: 0.2,
+      apiKey,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -1179,5 +1211,177 @@ ${speakers.map(s => `| ${s.speakerName} | ${s.talkTitle} | ${s.questionCount} | 
     }
     return fallback;
   }
+}
+
+const PLAIN_TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'html', 'htm', 'xml', 'log']);
+
+const EXTRACT_MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ppt: 'application/vnd.ms-powerpoint',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  json: 'application/json',
+  csv: 'text/csv',
+  tsv: 'text/tab-separated-values',
+};
+
+function extensionOf(filename: string): string {
+  const parts = filename.split('.');
+  return parts.length > 1 ? (parts.pop() || '').toLowerCase() : '';
+}
+
+export function resolveDocumentMimeType(filename: string, providedMime?: string): string {
+  const fromName = EXTRACT_MIME_BY_EXT[extensionOf(filename)];
+  if (fromName) return fromName;
+  if (providedMime && providedMime !== 'application/octet-stream') return providedMime;
+  return 'application/octet-stream';
+}
+
+function decodeBase64Utf8(base64: string): string {
+  return Buffer.from(base64, 'base64').toString('utf8');
+}
+
+/**
+ * Extract readable grounding text from an uploaded document.
+ * Plain text types are decoded locally; everything else is OCR/transcribed with Gemini multimodal.
+ */
+export async function extractDocumentText(params: {
+  base64: string;
+  mimeType?: string;
+  filename: string;
+  apiKey?: string | null;
+}): Promise<{ text: string; method: 'plain' | 'gemini-ocr'; charCount: number }> {
+  const filename = (params.filename || 'document').trim() || 'document';
+  const ext = extensionOf(filename);
+  const mimeType = resolveDocumentMimeType(filename, params.mimeType);
+  const base64 = (params.base64 || '').replace(/^data:[^;]+;base64,/, '').trim();
+
+  if (!base64) {
+    throw new Error('Document payload is empty');
+  }
+
+  // ~25MB raw ≈ ~33MB base64; reject oversized payloads early
+  if (base64.length > 36_000_000) {
+    throw new Error('Document is too large (max 25MB)');
+  }
+
+  const isPlain =
+    PLAIN_TEXT_EXTENSIONS.has(ext) ||
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    mimeType === 'application/xml';
+
+  if (isPlain) {
+    let text = decodeBase64Utf8(base64);
+    if (ext === 'json' || mimeType === 'application/json') {
+      try {
+        const parsed = JSON.parse(text);
+        text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
+      } catch {
+        // keep raw text
+      }
+    }
+    const cleaned = text.replace(/\u0000/g, '').trim();
+    if (!cleaned) {
+      throw new Error('No readable text found in the uploaded file');
+    }
+    return { text: cleaned, method: 'plain', charCount: cleaned.length };
+  }
+
+  const ai = getAiClient(params.apiKey);
+  if (!ai) {
+    throw new Error('GEMINI_API_KEY is not configured — cannot OCR this document');
+  }
+
+  const prompt =
+    `You are a document OCR and transcription engine for live event Q&A grounding.\n` +
+    `File name: ${filename}\n` +
+    `MIME type: ${mimeType}\n\n` +
+    `Extract ALL readable text from this document or image for retrieval-augmented grounding.\n` +
+    `Rules:\n` +
+    `- Preserve reading order (slides top-to-bottom, left-to-right; pages in order).\n` +
+    `- Include titles, bullet points, captions, table cells, and visible OCR text on images/scans.\n` +
+    `- For slide decks, prefix each slide with "Slide N:" when slide boundaries are clear.\n` +
+    `- Do NOT invent content that is not visible in the file.\n` +
+    `- Do NOT return markdown fences or commentary — plain text only.\n` +
+    `- If almost nothing is readable, return a short note starting with "NO_TEXT_FOUND:".`;
+
+  const models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < models.length; attempt++) {
+    const model = models[attempt];
+    try {
+      const config: Record<string, unknown> = {
+        temperature: 0.1,
+      };
+      if (model.includes('3.7')) {
+        config['thinkingConfig'] = { thinkingLevel: ThinkingLevel.LOW };
+      }
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType, data: base64 } },
+              { text: prompt },
+            ],
+          },
+        ],
+        config,
+      });
+
+      const raw = (response && typeof response.text === 'string' ? response.text : '').trim();
+      if (!raw) {
+        throw new Error('Empty OCR response');
+      }
+      if (raw.startsWith('NO_TEXT_FOUND:')) {
+        throw new Error(
+          'Gemini could not find readable text in this document. Try a clearer scan or paste notes manually.'
+        );
+      }
+
+      const cleaned = raw
+        .replace(/^```(?:text|markdown)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      if (cleaned.length < 8) {
+        throw new Error('OCR returned too little text from this document');
+      }
+
+      return { text: cleaned, method: 'gemini-ocr', charCount: cleaned.length };
+    } catch (err: unknown) {
+      lastError = err;
+      const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
+      if (
+        errorMsg.includes('API key not valid') ||
+        errorMsg.includes('API_KEY_INVALID') ||
+        errorMsg.includes('429') ||
+        errorMsg.includes('quota') ||
+        errorMsg.includes('RESOURCE_EXHAUSTED')
+      ) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+    }
+  }
+
+  const msg = lastError instanceof Error ? lastError.message : 'Document OCR failed';
+  throw new Error(msg);
 }
 

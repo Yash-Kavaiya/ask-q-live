@@ -4,16 +4,17 @@ import { getAuth, Auth } from 'firebase/auth';
 
 /**
  * Resolve Firebase apiKey at runtime — never hardcoded in source.
- * Server (SSR/Node): reads process.env.FIREBASE_API_KEY (Cloud Run secret).
- * Browser: reads window.__FIREBASE_API_KEY__ injected by the SSR server.
+ * Priority:
+ * 1. window.__FIREBASE_API_KEY__ (SSR inject on Cloud Run, or public/firebase-runtime-config.js on ng serve)
+ * 2. process.env.FIREBASE_API_KEY (Node / SSR)
  */
-function resolveApiKey(): string {
-  if (typeof process !== 'undefined' && process.env?.['FIREBASE_API_KEY']) {
-    return process.env['FIREBASE_API_KEY'];
-  }
+export function resolveFirebaseApiKey(): string {
   if (typeof window !== 'undefined') {
     const w = window as Window & { __FIREBASE_API_KEY__?: string };
-    if (w.__FIREBASE_API_KEY__) return w.__FIREBASE_API_KEY__;
+    if (w.__FIREBASE_API_KEY__?.trim()) return w.__FIREBASE_API_KEY__.trim();
+  }
+  if (typeof process !== 'undefined' && process.env?.['FIREBASE_API_KEY']?.trim()) {
+    return process.env['FIREBASE_API_KEY'].trim();
   }
   return '';
 }
@@ -27,7 +28,7 @@ const BASE_CONFIG = {
   firestoreDatabaseId: '(default)',
 };
 
-export const firebaseConfig = { ...BASE_CONFIG, apiKey: resolveApiKey() };
+export const firebaseConfig = { ...BASE_CONFIG, apiKey: resolveFirebaseApiKey() };
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
@@ -36,7 +37,7 @@ let auth: Auth | null = null;
 export function getFirebaseApp(): FirebaseApp | null {
   if (typeof window === 'undefined') return null;
   if (!app) {
-    const cfg = { ...BASE_CONFIG, apiKey: resolveApiKey() };
+    const cfg = { ...BASE_CONFIG, apiKey: resolveFirebaseApiKey() };
     app = getApps().length > 0 ? getApps()[0] : initializeApp(cfg);
   }
   return app;

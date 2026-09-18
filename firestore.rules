@@ -1,6 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // True only for a real (non-anonymous) Firebase Auth session whose
+    // token email matches {email}. Every visitor — including attendees —
+    // is signed in anonymously, so `request.auth != null` alone is not
+    // enough; anonymous tokens carry no email claim.
+    function isOwnEmail(email) {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == email.lower();
+    }
+
+    // Live Q&A sessions + questions (existing)
     match /sessions/{sessionId} {
       allow read: if true;
       allow create: if true;
@@ -10,6 +22,38 @@ service cloud.firestore {
         allow read: if true;
         allow create: if true;
         allow update, delete: if true;
+      }
+    }
+
+    // Multi-speaker series metadata + segments
+    // Shape:
+    //   series/{JOINCODE}
+    //   series/{JOINCODE}/segments/{segmentId}
+    match /series/{seriesCode} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if request.auth != null;
+
+      match /segments/{segmentId} {
+        allow read: if true;
+        allow create, update: if true;
+        allow delete: if request.auth != null;
+      }
+    }
+
+    // Speaker email → invited talks index
+    //   speakerInvites/{email}/claims/{joinCode_segmentId}
+    // Claims carry each segment's adminToken, so only the speaker who owns
+    // {email} (proven via their Firebase Auth token, not just the string in
+    // the URL) may read or write it.
+    match /speakerInvites/{email} {
+      allow read: if isOwnEmail(email);
+      allow write: if false;
+
+      match /claims/{claimId} {
+        allow read: if isOwnEmail(email);
+        allow create, update: if isOwnEmail(email);
+        allow delete: if request.auth != null;
       }
     }
   }

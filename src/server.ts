@@ -11,6 +11,7 @@ import { computeSessionMetrics } from './server/report-metrics.js';
 import {
   translateContent,
   generatePostSessionReport,
+  extractDocumentText,
 } from './server/gemini.service.js';
 import {
   requireAuth,
@@ -18,6 +19,15 @@ import {
   sanitizeSeriesForPublic,
   extractBearerToken,
 } from './server/auth.js';
+import type { Series } from './app/models/qa.models.js';
+
+try {
+  if (typeof (process as unknown as { loadEnvFile?: () => void }).loadEnvFile === 'function') {
+    (process as unknown as { loadEnvFile: () => void }).loadEnvFile();
+  }
+} catch {
+  // Ignored if .env file does not exist
+}
 
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
@@ -39,6 +49,15 @@ function getCode(req: express.Request): string {
 function getParam(req: express.Request, name: string): string {
   const val = req.params[name];
   return Array.isArray(val) ? val[0] : String(val || '');
+}
+
+// Segment lifecycle actions (start/end/pause/skip/extend) return the raw
+// in-memory Series on success for internal callers. Never forward that
+// straight to res.json — it still carries organizerToken and every
+// segment's adminToken/speakerEmail, and /start and /end are reachable by a
+// single speaker authenticated with only their own segment's token.
+function sanitizeSegmentActionResult<T extends { series?: Series }>(result: T): T {
+  return result.series ? { ...result, series: sanitizeSeriesForPublic(result.series) as Series } : result;
 }
 
 // JSON and URL-encoded body parsing for API endpoints (configured to 50mb for rich context data, slide exports, and transcripts)
@@ -87,6 +106,7 @@ app.post('/api/series', (req, res) => {
       customJoinCode,
       settings,
       segments,
+      geminiApiKey,
     } = req.body;
 
     const series = qaStore.createSeries({
@@ -102,6 +122,7 @@ app.post('/api/series', (req, res) => {
       customJoinCode,
       settings,
       segments,
+      geminiApiKey,
     });
     res.status(201).json(series);
   } catch (err: unknown) {
@@ -126,6 +147,28 @@ app.get('/api/series/:code', (req, res) => {
   });
 });
 
+// 1b-2. Speaker invites by registered Gmail (returns segment adminTokens for claim)
+app.get('/api/speaker/invites', (req, res) => {
+  const emailRaw = typeof req.query['email'] === 'string' ? req.query['email'] : '';
+  const email = emailRaw.trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    res.status(400).json({ error: 'A valid speaker email is required' });
+    return;
+  }
+  const invites = qaStore.findSpeakerInvitesByEmail(email);
+  res.json({ email, invites });
+});
+
+app.post('/api/speaker/claim', (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    res.status(400).json({ error: 'A valid speaker email is required' });
+    return;
+  }
+  const invites = qaStore.findSpeakerInvitesByEmail(email);
+  res.json({ email, invites });
+});
+
 // 1c. Patch Series (Organizer only)
 app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) => {
   const code = getCode(req);
@@ -134,7 +177,7 @@ app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) =
     res.status(404).json({ error: 'Series not found' });
     return;
   }
-  const { title, description, contextData, seriesContextData, settings, state } = req.body;
+  const { title, description, contextData, seriesContextData, settings, state, geminiApiKey } = req.body;
   if (title) series.title = title;
   if (description !== undefined) series.description = description;
   if (contextData !== undefined) {
@@ -150,6 +193,11 @@ app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) =
   }
   if (state) {
     series.state = state;
+  }
+  if (geminiApiKey !== undefined) {
+    const key = typeof geminiApiKey === 'string' ? geminiApiKey.trim() : '';
+    series.geminiApiKey =
+      key && key.length >= 10 && key !== 'MY_GEMINI_API_KEY' && key !== 'TODO' ? key : undefined;
   }
   series.revision = (series.revision || 1) + 1;
   series.updatedAt = new Date().toISOString();
@@ -373,7 +421,7 @@ app.get('/api/series/:code/segments', (req, res) => {
       return seg;
     }
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { adminToken, ...safe } = seg;
+    const { adminToken, speakerEmail, ...safe } = seg;
     return safe;
   });
 
@@ -407,12 +455,58 @@ app.patch('/api/series/:code/segments/:id', requireAuth(qaStore, ['organizer', '
     return;
   }
 
-  const { title, speakerName, speakerBio, speakerRole, speakerAvatar, groundingContext, contextData, categories, durationMinutes } = req.body;
+  const {
+    title,
+    speakerName,
+    speakerBio,
+    speakerRole,
+    speakerAvatar,
+    speakerEmail,
+    speakerOrg,
+    speakerX,
+    speakerLinkedIn,
+    speakerWebsite,
+    topicSummary,
+    sessionDescription,
+    groundingContext,
+    contextData,
+    categories,
+    durationMinutes,
+  } = req.body;
   if (title) seg.title = title;
   if (speakerName) seg.speakerName = speakerName;
   if (speakerBio !== undefined) seg.speakerBio = speakerBio;
   if (speakerRole !== undefined) seg.speakerRole = speakerRole;
   if (speakerAvatar !== undefined) seg.speakerAvatar = speakerAvatar;
+  if (speakerOrg !== undefined) seg.speakerOrg = speakerOrg;
+  if (topicSummary !== undefined) seg.topicSummary = topicSummary;
+  if (sessionDescription !== undefined) {
+    const desc = String(sessionDescription || '').trim();
+    seg.sessionDescription = desc || undefined;
+    // Keep topicSummary in sync when host edits the public session blurb
+    if (desc) seg.topicSummary = desc;
+  }
+  if (speakerEmail !== undefined) {
+    const email = String(speakerEmail || '').trim().toLowerCase();
+    seg.speakerEmail = email && email.includes('@') ? email : undefined;
+  }
+  if (speakerX !== undefined) {
+    seg.speakerX = String(speakerX || '').trim() || undefined;
+  }
+  if (speakerLinkedIn !== undefined) {
+    seg.speakerLinkedIn = String(speakerLinkedIn || '').trim() || undefined;
+  }
+  if (speakerWebsite !== undefined) {
+    seg.speakerWebsite = String(speakerWebsite || '').trim() || undefined;
+  }
+  // Keep nested speaker profile socials aligned
+  if (seg.speaker) {
+    if (speakerX !== undefined) seg.speaker.xUrl = seg.speakerX;
+    if (speakerLinkedIn !== undefined) seg.speaker.linkedinUrl = seg.speakerLinkedIn;
+    if (speakerWebsite !== undefined) seg.speaker.websiteUrl = seg.speakerWebsite;
+    if (speakerBio !== undefined) seg.speaker.bio = seg.speakerBio;
+    if (speakerOrg !== undefined) seg.speaker.org = seg.speakerOrg;
+  }
   if (groundingContext !== undefined) {
     seg.groundingContext = groundingContext;
     seg.contextData = groundingContext;
@@ -469,7 +563,7 @@ app.post('/api/series/:code/segments/:id/start', (req, res) => {
     res.status(result.status || 403).json({ error: result.error || 'Failed to start segment' });
     return;
   }
-  res.json(result);
+  res.json(sanitizeSegmentActionResult(result));
 });
 
 // 2g. End Segment (Organizer OR Speaker)
@@ -482,7 +576,7 @@ app.post('/api/series/:code/segments/:id/end', (req, res) => {
     res.status(result.status || 403).json({ error: result.error || 'Failed to end segment' });
     return;
   }
-  res.json(result);
+  res.json(sanitizeSegmentActionResult(result));
 });
 
 // 2h. Pause / Resume Segment (Organizer)
@@ -495,7 +589,7 @@ app.post('/api/series/:code/segments/:id/pause', requireAuth(qaStore, ['organize
     res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  res.json(result);
+  res.json(sanitizeSegmentActionResult(result));
 });
 
 // 2i. Skip Segment (Organizer)
@@ -508,7 +602,7 @@ app.post('/api/series/:code/segments/:id/skip', requireAuth(qaStore, ['organizer
     res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  res.json(result);
+  res.json(sanitizeSegmentActionResult(result));
 });
 
 // 2j. Extend Segment (Organizer)
@@ -522,7 +616,7 @@ app.post('/api/series/:code/segments/:id/extend', requireAuth(qaStore, ['organiz
     res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  res.json(result);
+  res.json(sanitizeSegmentActionResult(result));
 });
 
 // 2k. Update Segment Grounding (Organizer or Speaker)
@@ -871,6 +965,44 @@ app.post(['/api/series/:code/participants/:fingerprint/ban', '/api/sessions/:cod
   const { banned } = req.body;
   const success = qaStore.banParticipant(code, fingerprint, !!banned, token);
   res.json({ success });
+});
+
+// Document OCR / text extraction for grounding uploads (Gemini multimodal)
+app.post('/api/extract-document', async (req, res) => {
+  try {
+    const { filename, mimeType, data, base64 } = req.body || {};
+    const payload = typeof data === 'string' ? data : typeof base64 === 'string' ? base64 : '';
+    const name = typeof filename === 'string' ? filename : 'document';
+
+    if (!payload) {
+      res.status(400).json({ error: 'base64 document data is required' });
+      return;
+    }
+
+    const result = await extractDocumentText({
+      filename: name,
+      mimeType: typeof mimeType === 'string' ? mimeType : undefined,
+      base64: payload,
+    });
+
+    res.json({
+      success: true,
+      text: result.text,
+      method: result.method,
+      charCount: result.charCount,
+      filename: name,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Document extraction failed';
+    const status =
+      msg.includes('GEMINI_API_KEY') || msg.includes('not configured')
+        ? 503
+        : msg.includes('too large') || msg.includes('empty')
+          ? 400
+          : 500;
+    console.warn('extract-document failed:', msg.slice(0, 200));
+    res.status(status).json({ error: msg });
+  }
 });
 
 // 4g. Real-time Multilingual Translation

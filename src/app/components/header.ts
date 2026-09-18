@@ -17,6 +17,20 @@ import { FirebaseService } from '../services/firebase.service';
           
           <!-- Logo & Session Info -->
           <div class="flex items-center gap-3 min-w-0">
+            @if ((qaService.currentSession() || qaService.currentSeries()) && (qaService.isStaff() || firebaseService.isOrganizerLoggedIn())) {
+              <button
+                id="btn-nav-back-host-studio"
+                type="button"
+                (click)="backToHostStudio()"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:text-indigo-700 bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 transition-colors cursor-pointer shrink-0"
+                title="Back to Host Studio"
+                aria-label="Back to Host Studio"
+              >
+                <mat-icon class="text-base">arrow_back</mat-icon>
+                <span class="hidden sm:inline">Host Studio</span>
+              </button>
+            }
+
             <button
               type="button"
               (click)="!qaService.currentSession() && !qaService.currentSeries() && qaService.navigateToJoin()"
@@ -53,131 +67,6 @@ import { FirebaseService } from '../services/firebase.service';
               }
             </div>
           </div>
-
-          <!-- Center Navigation Tabs (when in session) -->
-          @if (qaService.currentSession() || qaService.currentSeries()) {
-            @if (qaService.isStaff()) {
-              <nav class="hidden lg:flex items-center gap-1 bg-[#F1F3F4] p-1 rounded-xl text-sm font-medium border border-[#E0E2EC] overflow-x-auto scrollbar-none max-w-full">
-                <a
-                  id="nav-tab-feed"
-                  [routerLink]="[nav().base, nav().code, 'feed']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                  [class.bg-white]="qaService.activeTab() === 'feed'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'feed'"
-                  [class.shadow-xs]="qaService.activeTab() === 'feed'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'feed'"
-                >
-                  <mat-icon class="text-base">question_answer</mat-icon>
-                  <span>Live Feed</span>
-                  @if (qaService.questions().length > 0) {
-                    <span class="text-xs px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-600 font-semibold">
-                      {{ qaService.questions().length }}
-                    </span>
-                  }
-                </a>
-
-                <!-- Series Run of Show / Control Room -->
-                <a
-                  id="nav-tab-series-control"
-                  [routerLink]="[nav().base, nav().code, 'run-of-show']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                  [class.bg-white]="qaService.activeTab() === 'series-control'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
-                  [class.shadow-xs]="qaService.activeTab() === 'series-control'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'series-control'"
-                >
-                  <mat-icon class="text-base">view_timeline</mat-icon>
-                  <span>Run of Show</span>
-                  @if (qaService.segments().length > 0) {
-                    <span class="text-xs px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700">
-                      {{ qaService.segments().length }}
-                    </span>
-                  }
-                </a>
-
-                <a
-                  id="nav-tab-teleprompter"
-                  [routerLink]="[nav().base, nav().code, 'teleprompter']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                  [class.bg-white]="qaService.activeTab() === 'teleprompter'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
-                  [class.shadow-xs]="qaService.activeTab() === 'teleprompter'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'teleprompter'"
-                >
-                  <mat-icon class="text-base">live_tv</mat-icon>
-                  <span>Teleprompter</span>
-                </a>
-
-                <a
-                  id="nav-tab-analytics"
-                  [routerLink]="[nav().base, nav().code, 'analytics']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                  [class.bg-white]="qaService.activeTab() === 'analytics'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
-                  [class.shadow-xs]="qaService.activeTab() === 'analytics'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
-                >
-                  <mat-icon class="text-base">insights</mat-icon>
-                  <span>Analytics</span>
-                </a>
-
-                @if (qaService.isAdmin()) {
-                  <a
-                    id="nav-tab-moderation"
-                    [routerLink]="[nav().base, nav().code, 'moderation']"
-                    class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0"
-                    [class.bg-white]="qaService.activeTab() === 'moderation'"
-                    [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
-                    [class.shadow-xs]="qaService.activeTab() === 'moderation'"
-                    [class.text-[#444746]]="qaService.activeTab() !== 'moderation'"
-                  >
-                    <mat-icon class="text-base">gavel</mat-icon>
-                    <span>Moderation</span>
-                    @if (qaService.pendingModerationQuestions().length > 0) {
-                      <span class="w-2 h-2 rounded-full bg-[#D93025] animate-pulse"></span>
-                    }
-                  </a>
-
-                  <a
-                    id="nav-tab-grounding"
-                    [routerLink]="[nav().base, nav().code, 'grounding']"
-                    class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                    [class.bg-white]="qaService.activeTab() === 'grounding'"
-                    [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
-                    [class.shadow-xs]="qaService.activeTab() === 'grounding'"
-                    [class.text-[#444746]]="qaService.activeTab() !== 'grounding'"
-                  >
-                    <mat-icon class="text-base">auto_stories</mat-icon>
-                    <span>Grounding</span>
-                  </a>
-                }
-
-                <a
-                  id="nav-tab-report"
-                  [routerLink]="[nav().base, nav().code, 'report']"
-                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                  [class.bg-white]="qaService.activeTab() === 'report'"
-                  [class.text-indigo-600]="qaService.activeTab() === 'report'"
-                  [class.shadow-xs]="qaService.activeTab() === 'report'"
-                  [class.text-[#444746]]="qaService.activeTab() !== 'report'"
-                >
-                  <mat-icon class="text-base">summarize</mat-icon>
-                  <span>Report</span>
-                </a>
-              </nav>
-            } @else {
-              <!-- Attendees only see Live Feed -->
-              <div class="hidden lg:flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold">
-                <mat-icon class="text-base text-indigo-600">question_answer</mat-icon>
-                <span>Live Audience Feed</span>
-                @if (qaService.questions().length > 0) {
-                  <span class="ml-1 text-[11px] px-1.5 py-0.2 rounded-full bg-indigo-600 text-white font-bold">
-                    {{ qaService.questions().length }}
-                  </span>
-                }
-              </div>
-            }
-          }
 
           <!-- Right Action Controls -->
           <div class="flex items-center gap-2 shrink-0">
@@ -284,6 +173,146 @@ import { FirebaseService } from '../services/firebase.service';
           </div>
         </div>
 
+        <!-- Desktop Secondary Navigation Row (own full-width row so all tabs and labels always fit) -->
+        @if (qaService.currentSession() || qaService.currentSeries()) {
+          @if (qaService.isStaff()) {
+            <nav class="hidden lg:flex items-center gap-1 py-2.5 border-t border-[#E0E2EC] text-sm font-medium overflow-x-auto">
+              <a
+                id="nav-tab-feed"
+                [routerLink]="[nav().base, nav().code, 'feed']"
+                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() === 'feed'"
+                [class.text-indigo-600]="qaService.activeTab() === 'feed'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'feed'"
+              >
+                <mat-icon class="text-base">question_answer</mat-icon>
+                <span>Live Feed</span>
+                @if (qaService.questions().length > 0) {
+                  <span class="text-xs px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-600 font-semibold">
+                    {{ qaService.questions().length }}
+                  </span>
+                }
+              </a>
+
+              <!-- Series Run of Show / Control Room -->
+              <a
+                id="nav-tab-series-control"
+                [routerLink]="[nav().base, nav().code, 'run-of-show']"
+                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() === 'series-control'"
+                [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'series-control'"
+              >
+                <mat-icon class="text-base">view_timeline</mat-icon>
+                <span>Run of Show</span>
+                @if (qaService.segments().length > 0) {
+                  <span class="text-xs px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700">
+                    {{ qaService.segments().length }}
+                  </span>
+                }
+              </a>
+
+              @if (qaService.isOrganizer() && qaService.currentSeries()) {
+                <a
+                  id="nav-tab-manage"
+                  [routerLink]="[nav().base, nav().code, 'manage']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  [class.bg-[#F1F3F4]]="qaService.activeTab() === 'manage'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'manage'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'manage'"
+                >
+                  <mat-icon class="text-base">settings</mat-icon>
+                  <span>Manage</span>
+                </a>
+              }
+
+              <a
+                id="nav-tab-teleprompter"
+                [routerLink]="[nav().base, nav().code, 'teleprompter']"
+                class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() === 'teleprompter'"
+                [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'teleprompter'"
+              >
+                <mat-icon class="text-base">live_tv</mat-icon>
+                <span>Teleprompter</span>
+              </a>
+
+              @if (!qaService.isSpeaker()) {
+                <a
+                  id="nav-tab-analytics"
+                  [routerLink]="[nav().base, nav().code, 'analytics']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  [class.bg-[#F1F3F4]]="qaService.activeTab() === 'analytics'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
+                >
+                  <mat-icon class="text-base">insights</mat-icon>
+                  <span>Analytics</span>
+                </a>
+              }
+
+              @if (qaService.isAdmin()) {
+                <a
+                  id="nav-tab-moderation"
+                  [routerLink]="[nav().base, nav().code, 'moderation']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0"
+                  [class.bg-[#F1F3F4]]="qaService.activeTab() === 'moderation'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'moderation'"
+                >
+                  <mat-icon class="text-base">gavel</mat-icon>
+                  <span>Moderation</span>
+                  @if (qaService.pendingModerationQuestions().length > 0) {
+                    <span class="w-2 h-2 rounded-full bg-[#D93025] animate-pulse"></span>
+                  }
+                </a>
+              }
+
+              @if (qaService.isAdmin() || qaService.isSpeaker()) {
+                <a
+                  id="nav-tab-grounding"
+                  [routerLink]="[nav().base, nav().code, 'grounding']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  [class.bg-[#F1F3F4]]="qaService.activeTab() === 'grounding'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'grounding'"
+                >
+                  <mat-icon class="text-base">auto_stories</mat-icon>
+                  <span>Grounding</span>
+                </a>
+              }
+
+              @if (!qaService.isSpeaker()) {
+                <a
+                  id="nav-tab-report"
+                  [routerLink]="[nav().base, nav().code, 'report']"
+                  class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  [class.bg-[#F1F3F4]]="qaService.activeTab() === 'report'"
+                  [class.text-indigo-600]="qaService.activeTab() === 'report'"
+                  [class.text-[#444746]]="qaService.activeTab() !== 'report'"
+                >
+                  <mat-icon class="text-base">summarize</mat-icon>
+                  <span>Report</span>
+                </a>
+              }
+            </nav>
+          } @else {
+            <!-- Attendees only see Live Feed -->
+            <div class="hidden lg:flex items-center py-2.5 border-t border-[#E0E2EC]">
+              <div class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold">
+                <mat-icon class="text-base text-indigo-600">question_answer</mat-icon>
+                <span>Live Audience Feed</span>
+                @if (qaService.questions().length > 0) {
+                  <span class="ml-1 text-[11px] px-1.5 py-0.2 rounded-full bg-indigo-600 text-white font-bold">
+                    {{ qaService.questions().length }}
+                  </span>
+                }
+              </div>
+            </div>
+          }
+        }
+
         <!-- Mobile Secondary Tab Bar (only for staff with multiple views) -->
         @if ((qaService.currentSession() || qaService.currentSeries()) && qaService.isStaff()) {
           <div class="flex lg:hidden overflow-x-auto py-2 gap-1.5 border-t border-[#E0E2EC] scrollbar-none text-xs">
@@ -313,6 +342,21 @@ import { FirebaseService } from '../services/firebase.service';
               Run of Show
             </a>
 
+            @if (qaService.isOrganizer() && qaService.currentSeries()) {
+              <a
+                id="mob-tab-manage"
+                [routerLink]="[nav().base, nav().code, 'manage']"
+                class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
+                [class.bg-indigo-600]="qaService.activeTab() === 'manage'"
+                [class.text-white]="qaService.activeTab() === 'manage'"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'manage'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'manage'"
+              >
+                <mat-icon class="text-sm">settings</mat-icon>
+                Manage
+              </a>
+            }
+
             <a
               id="mob-tab-teleprompter"
               [routerLink]="[nav().base, nav().code, 'teleprompter']"
@@ -326,6 +370,7 @@ import { FirebaseService } from '../services/firebase.service';
               Teleprompter
             </a>
 
+            @if (!qaService.isSpeaker()) {
             <a
               id="mob-tab-analytics"
               [routerLink]="[nav().base, nav().code, 'analytics']"
@@ -338,6 +383,7 @@ import { FirebaseService } from '../services/firebase.service';
               <mat-icon class="text-sm">insights</mat-icon>
               Analytics
             </a>
+            }
 
             @if (qaService.isAdmin()) {
               <a
@@ -354,6 +400,22 @@ import { FirebaseService } from '../services/firebase.service';
               </a>
             }
 
+            @if (qaService.isAdmin() || qaService.isSpeaker()) {
+              <a
+                id="mob-tab-grounding"
+                [routerLink]="[nav().base, nav().code, 'grounding']"
+                class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
+                [class.bg-indigo-600]="qaService.activeTab() === 'grounding'"
+                [class.text-white]="qaService.activeTab() === 'grounding'"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'grounding'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'grounding'"
+              >
+                <mat-icon class="text-sm">auto_stories</mat-icon>
+                Grounding
+              </a>
+            }
+
+            @if (!qaService.isSpeaker()) {
             <a
               id="mob-tab-report"
               [routerLink]="[nav().base, nav().code, 'report']"
@@ -366,6 +428,7 @@ import { FirebaseService } from '../services/firebase.service';
               <mat-icon class="text-sm">summarize</mat-icon>
               Report
             </a>
+            }
           </div>
         }
       </div>
@@ -397,6 +460,11 @@ export class Header {
         this.isCodeCopied.set(false);
       }, 2500);
     }
+  }
+
+  /** Leave the live room and return to Host Studio (host/staff path from /session → /host). */
+  public backToHostStudio(): void {
+    this.qaService.leaveSessionToHostStudio();
   }
 }
 

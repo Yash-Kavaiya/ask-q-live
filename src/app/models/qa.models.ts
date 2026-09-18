@@ -13,6 +13,9 @@ export interface SpeakerProfile {
   org?: string;
   bio?: string;
   avatarUrl?: string;
+  xUrl?: string;
+  linkedinUrl?: string;
+  websiteUrl?: string;
 }
 
 export interface SessionSettings {
@@ -63,6 +66,14 @@ export interface Segment {
   contextData?: string;
   categories: string[];
   adminToken: string;
+  /** Invited speaker Gmail / email for direct invite + speaker sign-in claim. */
+  speakerEmail?: string;
+  /** Public social handles / links (shown on speaker profile & lobby). */
+  speakerX?: string;
+  speakerLinkedIn?: string;
+  speakerWebsite?: string;
+  /** Short public description of this talk / session segment. */
+  sessionDescription?: string;
   order: number;
   graceWindowMinutes: number;
   moderationSensitivity?: ModerationSensitivity;
@@ -89,6 +100,10 @@ export interface Series {
   createdAt: string;
   updatedAt: string;
   revision?: number;
+
+  // Host-provided Gemini key for this series only. If unset, server uses platform GEMINI_API_KEY.
+  // Never returned on public series GET responses.
+  geminiApiKey?: string;
 
   // Backward-compatibility and UI convenience aliases:
   joinCode: string;
@@ -370,6 +385,20 @@ export interface HostedSessionRecord {
   status?: 'ACTIVE' | 'CONCLUDED' | 'SCHEDULED';
   segmentCount?: number;
   questionCount?: number;
+}
+
+/** Segment invite claimed by a speaker after signing in with their registered Gmail. */
+export interface SpeakerInviteRecord {
+  joinCode: string;
+  seriesTitle: string;
+  seriesState?: string;
+  segmentId: string;
+  segmentTitle: string;
+  speakerName: string;
+  speakerEmail: string;
+  adminToken: string;
+  status: string;
+  order: number;
 }
 
 export interface ActiveLiveRoomPreview {

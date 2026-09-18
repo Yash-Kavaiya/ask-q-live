@@ -15,16 +15,17 @@ import {
   UserAccessInfo,
   SeriesReport,
   HostedSessionRecord,
+  SpeakerInviteRecord,
   ActiveLiveRoomPreview,
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
 
 export type ActiveTab =
-  | 'feed' | 'lobby' | 'series-control' | 'teleprompter' | 'analytics'
+  | 'feed' | 'lobby' | 'series-control' | 'manage' | 'teleprompter' | 'analytics'
   | 'moderation' | 'grounding' | 'report' | 'schedule';
 
 const ROUTABLE_TABS: ActiveTab[] = [
-  'feed', 'series-control', 'teleprompter', 'analytics', 'moderation', 'grounding', 'report',
+  'feed', 'series-control', 'manage', 'teleprompter', 'analytics', 'moderation', 'grounding', 'report',
 ];
 
 // ActiveTab -> URL path segment. Everything is 1:1 except the Run of Show tab,
@@ -54,6 +55,7 @@ export class QaService {
 
   // Past hosted sessions history
   public hostedSessions = signal<HostedSessionRecord[]>([]);
+  public speakerInvites = signal<SpeakerInviteRecord[]>([]);
 
   // Universal Share QR & Link modal state
   public shareModalData = signal<{
@@ -117,11 +119,18 @@ export class QaService {
     return series.segments.find(s => s.status === 'LIVE') || null;
   });
 
-  // Segments list sorted by order
+  // Segments list sorted by order (speakers only see their own assigned talk)
   public segments = computed<Segment[]>(() => {
     const series = this.currentSeries();
     if (!series || !series.segments) return [];
-    return [...series.segments].sort((a, b) => a.order - b.order);
+    const sorted = [...series.segments].sort((a, b) => a.order - b.order);
+    if (this.isSpeaker()) {
+      const mine = this.speakerSegmentId();
+      if (mine) return sorted.filter(s => s.id === mine);
+      const scope = this.userAuthScope();
+      if (scope.length > 0) return sorted.filter(s => scope.includes(s.id));
+    }
+    return sorted;
   });
 
   private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -362,7 +371,14 @@ export class QaService {
     if (typeof window !== 'undefined' && window.location) {
       // A staff ?token= is honoured on every URL shape, canonical or legacy.
       const params = new URLSearchParams(window.location.search);
-      const urlToken = params.get('token');
+      const rawToken = params.get('token');
+      const urlToken =
+        rawToken &&
+        rawToken !== 'undefined' &&
+        rawToken !== 'null' &&
+        rawToken.trim().length > 0
+          ? rawToken.trim()
+          : null;
       if (urlToken) {
         this.userAuthToken.set(urlToken);
         localStorage.setItem('live_qa_auth_token', urlToken);
@@ -386,11 +402,15 @@ export class QaService {
         }
         // Automatically join the session
         setTimeout(() => {
-          this.joinSession(detectedCode, this.userName() || (urlToken ? 'Organizer' : 'Attendee'))
+          this.joinSession(detectedCode, this.userName() || (urlToken ? 'Speaker' : 'Attendee'))
             .then((success) => {
               this.isAutoJoiningFromUrl.set(false);
               if (success) {
                 this.showToast(`Entered Event Room #${detectedCode}`);
+                if (urlToken && this.isSpeaker()) {
+                  this.selectedSegmentFilter.set(this.speakerSegmentId() || 'ALL');
+                  this.navigateToTab('series-control');
+                }
               }
             })
             .catch(() => {
@@ -421,7 +441,9 @@ export class QaService {
       }
 
       // Segment filtering
-      if (segFilter !== 'ALL') {
+      if (this.isSpeaker() && this.speakerSegmentId()) {
+        if (q.segmentId !== this.speakerSegmentId()) return false;
+      } else if (segFilter !== 'ALL') {
         if (q.segmentId !== segFilter) return false;
       }
 
@@ -524,6 +546,9 @@ export class QaService {
         this.showToast('Authenticated as Event Organizer. Control room enabled.');
       } else if (authInfo.role === 'speaker') {
         this.showToast('Authenticated as Speaker. Speaker green room enabled.');
+        if (authInfo.segmentId) {
+          this.selectedSegmentFilter.set(authInfo.segmentId);
+        }
       } else {
         this.showToast('Switched to Attendee view.');
       }
@@ -950,7 +975,14 @@ export class QaService {
         const seriesRes = await fetch(`/api/series/${code}`);
         if (seriesRes.ok) {
           const sData = await seriesRes.json();
-          this.currentSeries.set(sData.series);
+          let series = sData.series as SessionSeries | undefined;
+          if (series) {
+            series = await this.mergePrivilegedSegmentTokens(code, series);
+            series = await this.mergeFirestoreSeriesProfile(code, series);
+            this.currentSeries.set(series);
+          } else {
+            this.currentSeries.set(null);
+          }
         } else {
           this.currentSeries.set(null);
         }
@@ -961,8 +993,11 @@ export class QaService {
 
       // Verify any saved token
       const existingToken = this.userAuthToken();
-      if (existingToken) {
+      if (existingToken && existingToken !== 'undefined' && existingToken !== 'null') {
         await this.authenticateRole(existingToken);
+        if (this.isSpeaker() && this.speakerSegmentId()) {
+          this.selectedSegmentFilter.set(this.speakerSegmentId()!);
+        }
       }
 
       // Initialize real-time Firestore listeners
@@ -1045,6 +1080,7 @@ export class QaService {
     timezone?: string;
     autoAdvance?: boolean;
     customJoinCode?: string;
+    geminiApiKey?: string;
     segments?: Partial<Segment>[];
   }): Promise<SessionSeries | null> {
     this.isLoading.set(true);
@@ -1064,6 +1100,10 @@ export class QaService {
 
       const data = await res.json();
       const series: SessionSeries = data.series || data;
+      // Keep host Gemini key server-side only — do not retain in browser state.
+      if (series.geminiApiKey) {
+        delete series.geminiApiKey;
+      }
       this.currentSeries.set(series);
       this.userRole.set('organizer');
       this.userAuthToken.set(series.organizerToken);
@@ -1092,6 +1132,10 @@ export class QaService {
       });
 
       this.setupFirestoreListeners(series.joinCode);
+      // Persist structured series + segments + speaker invite index to Firestore
+      void this.firebaseService.syncSeriesToFirestore(series, {
+        hasCustomGeminiKey: !!(payload.geminiApiKey && payload.geminiApiKey.trim()),
+      });
       await this.refreshSessionData();
       this.startPolling();
       this.isLoading.set(false);
@@ -1197,6 +1241,18 @@ export class QaService {
   }
 
   public leaveSession(): void {
+    this.teardownSessionState();
+    this.currentView.set('join');
+    this.router.navigate(['/']);
+  }
+
+  /** Leave the live room and return to Host Studio (used by host Back button). */
+  public leaveSessionToHostStudio(): void {
+    this.teardownSessionState();
+    this.navigateToHostStudio();
+  }
+
+  private teardownSessionState(): void {
     this.firebaseService.clearListeners();
     this.stopPolling();
     this.currentSession.set(null);
@@ -1211,10 +1267,8 @@ export class QaService {
     this.selectedSegmentFilter.set('ALL');
     this.searchQuery.set('');
     // Full teardown: there is no session left to navigate within, so reset the
-    // derived tab state directly before heading back to the landing page.
+    // derived tab state directly before heading back.
     this._activeTab.set('feed');
-    this.currentView.set('join');
-    this.router.navigate(['/']);
   }
 
   private startPolling(): void {
@@ -1286,12 +1340,215 @@ export class QaService {
 
       if (seriesRes.ok) {
         const sData = await seriesRes.json();
-        this.currentSeries.set(sData.series);
+        let series = sData.series as SessionSeries | undefined;
+        if (series) {
+          series = await this.mergePrivilegedSegmentTokens(code, series);
+          this.currentSeries.set(series);
+        }
       }
     } catch (err) {
       if (!silent) {
         console.error('Failed to sync session data:', err);
       }
+    }
+  }
+
+  /**
+   * Public GET /api/series strips adminTokens. Organizers/speakers need them
+   * for Speaker Link copy — rehydrate from the privileged segments endpoint.
+   */
+  private async mergePrivilegedSegmentTokens(
+    code: string,
+    series: SessionSeries
+  ): Promise<SessionSeries> {
+    const token = this.userAuthToken();
+    if (!token || !series.segments?.length) return series;
+    if (!this.isOrganizer() && !this.isSpeaker()) return series;
+
+    try {
+      const res = await fetch(`/api/series/${code}/segments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return series;
+      const data = await res.json();
+      const privileged: Segment[] = data.segments || [];
+      if (!privileged.length) return series;
+
+      const byId = new Map(privileged.map(s => [s.id, s]));
+      const merged = series.segments.map(seg => {
+        const full = byId.get(seg.id);
+        if (!full) return seg;
+        return {
+          ...seg,
+          adminToken: full.adminToken || seg.adminToken,
+          speakerEmail: full.speakerEmail ?? seg.speakerEmail,
+          speakerX: full.speakerX ?? seg.speakerX,
+          speakerLinkedIn: full.speakerLinkedIn ?? seg.speakerLinkedIn,
+          speakerWebsite: full.speakerWebsite ?? seg.speakerWebsite,
+          sessionDescription: full.sessionDescription ?? seg.sessionDescription,
+          topicSummary: full.topicSummary ?? seg.topicSummary,
+        };
+      });
+      return { ...series, segments: merged };
+    } catch {
+      return series;
+    }
+  }
+
+  /**
+   * Merge durable Firestore speaker profiles into in-memory series
+   * (survives server restarts when API is memory-backed).
+   */
+  private async mergeFirestoreSeriesProfile(
+    code: string,
+    series: SessionSeries
+  ): Promise<SessionSeries> {
+    try {
+      const loaded = await this.firebaseService.loadSeriesFromFirestore(code);
+      if (!loaded?.segments?.length) return series;
+
+      const byId = new Map(loaded.segments.map(s => [s.id, s]));
+      const mergedSegs = (series.segments || []).map(seg => {
+        const fs = byId.get(seg.id);
+        if (!fs) return seg;
+        return {
+          ...seg,
+          speakerName: seg.speakerName || fs.speakerName,
+          speakerRole: seg.speakerRole || fs.speakerRole,
+          speakerOrg: seg.speakerOrg || fs.speakerOrg,
+          speakerBio: seg.speakerBio || fs.speakerBio,
+          speakerEmail: seg.speakerEmail || fs.speakerEmail,
+          speakerX: seg.speakerX || fs.speakerX,
+          speakerLinkedIn: seg.speakerLinkedIn || fs.speakerLinkedIn,
+          speakerWebsite: seg.speakerWebsite || fs.speakerWebsite,
+          sessionDescription: seg.sessionDescription || fs.sessionDescription,
+          topicSummary: seg.topicSummary || fs.topicSummary,
+          adminToken: seg.adminToken || fs.adminToken,
+          speaker: {
+            ...(fs.speaker || {}),
+            ...(seg.speaker || {}),
+            name: seg.speakerName || fs.speakerName,
+            xUrl: seg.speakerX || fs.speakerX || seg.speaker?.xUrl || fs.speaker?.xUrl,
+            linkedinUrl:
+              seg.speakerLinkedIn ||
+              fs.speakerLinkedIn ||
+              seg.speaker?.linkedinUrl ||
+              fs.speaker?.linkedinUrl,
+            websiteUrl:
+              seg.speakerWebsite ||
+              fs.speakerWebsite ||
+              seg.speaker?.websiteUrl ||
+              fs.speaker?.websiteUrl,
+          },
+        };
+      });
+
+      return {
+        ...series,
+        description: series.description || loaded.series.description,
+        title: series.title || loaded.series.title || series.title,
+        segments: mergedSegs,
+      };
+    } catch {
+      return series;
+    }
+  }
+
+  /** Fetch segment invites registered to this speaker's Gmail. */
+  public async fetchSpeakerInvites(email?: string): Promise<SpeakerInviteRecord[]> {
+    const resolved = (email || this.userEmail() || '').trim().toLowerCase();
+    if (!resolved || !resolved.includes('@')) {
+      this.speakerInvites.set([]);
+      return [];
+    }
+
+    try {
+      const [apiRes, firestoreClaims] = await Promise.all([
+        fetch(`/api/speaker/invites?email=${encodeURIComponent(resolved)}`).catch(() => null),
+        this.firebaseService.loadSpeakerInvitesFromFirestore(resolved),
+      ]);
+
+      const byKey = new Map<string, SpeakerInviteRecord>();
+
+      if (apiRes && apiRes.ok) {
+        const data = await apiRes.json();
+        const invites: SpeakerInviteRecord[] = Array.isArray(data.invites) ? data.invites : [];
+        for (const inv of invites) {
+          byKey.set(`${inv.joinCode}_${inv.segmentId}`, inv);
+        }
+      }
+
+      for (const claim of firestoreClaims) {
+        const key = `${claim.joinCode}_${claim.segmentId}`;
+        if (!byKey.has(key) && claim.adminToken) {
+          byKey.set(key, {
+            joinCode: claim.joinCode,
+            seriesTitle: claim.seriesTitle,
+            seriesState: claim.seriesState,
+            segmentId: claim.segmentId,
+            segmentTitle: claim.segmentTitle,
+            speakerName: claim.speakerName,
+            speakerEmail: claim.speakerEmail,
+            adminToken: claim.adminToken,
+            status: claim.status,
+            order: claim.order,
+          });
+        }
+      }
+
+      const invites = Array.from(byKey.values()).sort((a, b) => a.order - b.order);
+      this.speakerInvites.set(invites);
+      return invites;
+    } catch (err) {
+      console.warn('Failed to load speaker invites:', err);
+      this.speakerInvites.set([]);
+      return [];
+    }
+  }
+
+  /** Join a series as an invited speaker using their segment adminToken. */
+  public async joinAsInvitedSpeaker(invite: SpeakerInviteRecord): Promise<boolean> {
+    if (!invite?.joinCode || !invite.adminToken) return false;
+
+    this.userAuthToken.set(invite.adminToken);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem('live_qa_auth_token', invite.adminToken);
+    }
+
+    const ok = await this.joinSession(invite.joinCode, invite.speakerName || this.userName() || 'Speaker', {
+      adminToken: invite.adminToken,
+      type: 'series',
+      title: invite.seriesTitle,
+    });
+
+    if (ok) {
+      this.speakerSegmentId.set(invite.segmentId);
+      this.selectedSegmentFilter.set(invite.segmentId);
+      this.navigateToTab('series-control');
+      this.showToast(`Opened your talk: ${invite.segmentTitle}`);
+    }
+    return ok;
+  }
+
+  /** Resolve a real speaker adminToken for a segment (never rely on sanitized series state). */
+  public async resolveSpeakerAdminToken(segmentId: string): Promise<string | null> {
+    const code = this.currentSeries()?.joinCode || this.currentSession()?.joinCode;
+    const token = this.userAuthToken();
+    if (!code || !token) return null;
+
+    const cached = this.currentSeries()?.segments?.find(s => s.id === segmentId)?.adminToken;
+    if (cached && cached !== 'undefined') return cached;
+
+    try {
+      const res = await fetch(`/api/series/${code}/segments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const seg = (data.segments || []).find((s: Segment) => s.id === segmentId);
+      return seg?.adminToken && seg.adminToken !== 'undefined' ? seg.adminToken : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1367,6 +1624,44 @@ export class QaService {
     }
   }
 
+  public async updateSeries(payload: {
+    title?: string;
+    description?: string;
+    geminiApiKey?: string;
+    contextData?: string;
+  }): Promise<boolean> {
+    const code = this.currentSeries()?.joinCode;
+    if (!code) return false;
+
+    const token = this.userAuthToken();
+    try {
+      const res = await fetch(`/api/series/${code}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ...payload, token }),
+      });
+
+      if (!res.ok) throw new Error('Failed to update series');
+      const data = await res.json();
+      if (data.series) {
+        const merged = await this.mergePrivilegedSegmentTokens(code, data.series);
+        this.currentSeries.set(merged);
+        void this.firebaseService.syncSeriesToFirestore(merged);
+      }
+      this.showToast('Series settings saved');
+      await this.refreshSessionData(true);
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error updating series';
+      this.errorMessage.set(msg);
+      this.showToast(msg);
+      return false;
+    }
+  }
+
   public async updateSegment(segmentId: string, payload: Partial<Segment>): Promise<boolean> {
     const code = this.currentSeries()?.joinCode;
     if (!code) return false;
@@ -1383,8 +1678,64 @@ export class QaService {
       });
 
       if (!res.ok) throw new Error('Failed to update segment');
+
+      // Optimistically keep socials / session blurb in local series (poll may lag)
+      const before = this.currentSeries();
+      if (before?.segments) {
+        this.currentSeries.set({
+          ...before,
+          segments: before.segments.map(s =>
+            s.id === segmentId
+              ? {
+                  ...s,
+                  ...payload,
+                  speaker: {
+                    ...(s.speaker || { name: s.speakerName }),
+                    name: payload.speakerName || s.speakerName,
+                    title: payload.speakerRole ?? s.speakerRole,
+                    org: payload.speakerOrg ?? s.speakerOrg,
+                    bio: payload.speakerBio ?? s.speakerBio,
+                    xUrl: payload.speakerX ?? s.speakerX,
+                    linkedinUrl: payload.speakerLinkedIn ?? s.speakerLinkedIn,
+                    websiteUrl: payload.speakerWebsite ?? s.speakerWebsite,
+                  },
+                }
+              : s
+          ),
+        });
+      }
+
       this.showToast('Segment details saved successfully');
       await this.refreshSessionData(true);
+      // Re-apply payload after public poll strip/merge
+      const after = this.currentSeries();
+      if (after?.segments) {
+        const mergedSeries = {
+          ...after,
+          segments: after.segments.map(s =>
+            s.id === segmentId
+              ? {
+                  ...s,
+                  speakerEmail: payload.speakerEmail ?? s.speakerEmail,
+                  speakerX: payload.speakerX ?? s.speakerX,
+                  speakerLinkedIn: payload.speakerLinkedIn ?? s.speakerLinkedIn,
+                  speakerWebsite: payload.speakerWebsite ?? s.speakerWebsite,
+                  sessionDescription: payload.sessionDescription ?? s.sessionDescription,
+                  topicSummary: payload.topicSummary ?? s.topicSummary,
+                }
+              : s
+          ),
+        };
+        this.currentSeries.set(mergedSeries);
+        const seg = mergedSeries.segments.find(s => s.id === segmentId);
+        if (seg) {
+          const withToken = {
+            ...seg,
+            adminToken: seg.adminToken || (await this.resolveSpeakerAdminToken(segmentId)) || '',
+          };
+          void this.firebaseService.syncSegmentToFirestore(mergedSeries, withToken);
+        }
+      }
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating segment';
@@ -1411,6 +1762,10 @@ export class QaService {
       if (!res.ok) throw new Error('Failed to add segment');
       this.showToast('New segment added to run of show');
       await this.refreshSessionData(true);
+      const series = this.currentSeries();
+      if (series) {
+        void this.firebaseService.syncSeriesToFirestore(series);
+      }
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error adding segment';

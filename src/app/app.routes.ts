@@ -4,6 +4,7 @@ import { AuthPage } from './components/auth-page';
 import { HostStudio } from './components/host-studio';
 import { QuestionFeed } from './components/question-feed';
 import { SeriesControlRoom } from './components/series-control-room';
+import { SeriesManage } from './components/series-manage';
 import { Teleprompter } from './components/teleprompter';
 import { WordCloudAnalytics } from './components/word-cloud-analytics';
 import { ModerationQueue } from './components/moderation-queue';
@@ -15,10 +16,11 @@ const sessionChildRoutes: Routes = [
   { path: '', redirectTo: 'feed', pathMatch: 'full' },
   { path: 'feed', component: QuestionFeed },
   { path: 'run-of-show', component: SeriesControlRoom, canActivate: [staffTabGuard] },
+  { path: 'manage', component: SeriesManage, canActivate: [adminTabGuard] },
   { path: 'teleprompter', component: Teleprompter, canActivate: [staffTabGuard] },
   { path: 'analytics', component: WordCloudAnalytics, canActivate: [staffTabGuard] },
   { path: 'moderation', component: ModerationQueue, canActivate: [adminTabGuard] },
-  { path: 'grounding', component: GroundingContext, canActivate: [adminTabGuard] },
+  { path: 'grounding', component: GroundingContext, canActivate: [staffTabGuard] },
   { path: 'report', component: ExecutiveReport, canActivate: [staffTabGuard] },
 ];
 

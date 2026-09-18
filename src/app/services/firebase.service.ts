@@ -8,9 +8,12 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  getDoc,
+  getDocs,
   onSnapshot,
   query,
   orderBy,
+  writeBatch,
   Unsubscribe,
   limit,
 } from 'firebase/firestore';
@@ -19,7 +22,6 @@ import {
   Auth,
   signInAnonymously,
   onAuthStateChanged,
-  User,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
@@ -28,7 +30,32 @@ import {
   signOut,
 } from 'firebase/auth';
 import firebaseConfigData from '../../../firebase-applet-config.json';
-import { Question, Session, QuestionStatus } from '../models/qa.models';
+import { resolveFirebaseApiKey } from '../firebase';
+import { Question, Session, QuestionStatus, Segment, Series, SessionSeries } from '../models/qa.models';
+import {
+  fromFirestoreSegment,
+  normalizeInviteEmail,
+  speakerInviteDocId,
+  toFirestoreSegment,
+  toFirestoreSeries,
+  FirestoreSpeakerInviteClaim,
+} from './firestore-series.mapper';
+
+/** Minimal organizer identity used by UI + guards (Firebase User or local fallback). */
+export interface OrganizerAuthUser {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  isAnonymous: boolean;
+}
+
+interface LocalAccountRecord {
+  uid: string;
+  email: string;
+  displayName: string;
+  passwordHash: string;
+  createdAt: string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -38,19 +65,24 @@ export class FirebaseService {
   public db: Firestore | null = null;
   public auth: Auth | null = null;
 
-  public currentUser = signal<User | null>(null);
+  public currentUser = signal<OrganizerAuthUser | null>(null);
   public isConnected = signal<boolean>(false);
   public connectionStatus = signal<'initializing' | 'connected' | 'offline' | 'error'>('initializing');
   public lastError = signal<string | null>(null);
+  /** True when Firebase Auth is unavailable and browser-local host accounts are used. */
+  public localAuthFallback = signal<boolean>(false);
 
   private activeUnsubscribes: Unsubscribe[] = [];
+
+  private static readonly AUTH_READY_TIMEOUT_MS = 5000;
+  private static readonly LOCAL_ACCOUNTS_KEY = 'askq_local_organizer_accounts';
+  private static readonly LOCAL_SESSION_KEY = 'askq_local_organizer_session';
 
   // Resolves once Firebase has had a chance to rehydrate persisted auth (i.e.
   // on the FIRST onAuthStateChanged emission), or after AUTH_READY_TIMEOUT_MS
   // if Firebase is unreachable/misconfigured so navigation never hangs.
   // Route guards await this before reading isOrganizerLoggedIn(), otherwise a
   // cold boot on /host would bounce a genuinely signed-in organizer to /auth.
-  private static readonly AUTH_READY_TIMEOUT_MS = 5000;
   private resolveAuthReady: (() => void) | null = null;
   public readonly authReady: Promise<void> = new Promise<void>((resolve) => {
     this.resolveAuthReady = resolve;
@@ -68,6 +100,129 @@ export class FirebaseService {
     }
   }
 
+  private enableLocalAuthFallback(reason: string): void {
+    this.auth = null;
+    this.localAuthFallback.set(true);
+    this.isConnected.set(false);
+    this.connectionStatus.set('offline');
+    this.lastError.set(reason);
+    this.restoreLocalSession();
+    console.warn('Local organizer auth fallback active:', reason);
+  }
+
+  private restoreLocalSession(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(FirebaseService.LOCAL_SESSION_KEY);
+      if (!raw) return;
+      const session = JSON.parse(raw) as OrganizerAuthUser;
+      if (session?.uid && session.email && !session.isAnonymous) {
+        this.currentUser.set({
+          uid: session.uid,
+          email: session.email,
+          displayName: session.displayName || null,
+          isAnonymous: false,
+        });
+      }
+    } catch {
+      localStorage.removeItem(FirebaseService.LOCAL_SESSION_KEY);
+    }
+  }
+
+  private persistLocalSession(user: OrganizerAuthUser): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(FirebaseService.LOCAL_SESSION_KEY, JSON.stringify(user));
+  }
+
+  private clearLocalSession(): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(FirebaseService.LOCAL_SESSION_KEY);
+  }
+
+  private readLocalAccounts(): LocalAccountRecord[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(FirebaseService.LOCAL_ACCOUNTS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as LocalAccountRecord[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private writeLocalAccounts(accounts: LocalAccountRecord[]): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(FirebaseService.LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    const data = new TextEncoder().encode(password);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  private async signUpLocally(
+    email: string,
+    pass: string,
+    displayName?: string
+  ): Promise<OrganizerAuthUser> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !pass || pass.length < 6) {
+      throw new Error('Please provide a valid email and a password of at least 6 characters.');
+    }
+
+    const accounts = this.readLocalAccounts();
+    if (accounts.some((a) => a.email === normalizedEmail)) {
+      throw new Error('An account with this email already exists. Try signing in instead.');
+    }
+
+    const user: OrganizerAuthUser = {
+      uid: 'local_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20),
+      email: normalizedEmail,
+      displayName: (displayName || '').trim() || normalizedEmail.split('@')[0],
+      isAnonymous: false,
+    };
+
+    accounts.push({
+      uid: user.uid,
+      email: normalizedEmail,
+      displayName: user.displayName || normalizedEmail.split('@')[0],
+      passwordHash: await this.hashPassword(pass),
+      createdAt: new Date().toISOString(),
+    });
+    this.writeLocalAccounts(accounts);
+    this.persistLocalSession(user);
+    this.currentUser.set(user);
+    return user;
+  }
+
+  private async signInLocally(email: string, pass: string): Promise<OrganizerAuthUser> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const accounts = this.readLocalAccounts();
+    const account = accounts.find((a) => a.email === normalizedEmail);
+    if (!account) {
+      throw new Error('No account found for this email. Create a host account first.');
+    }
+
+    const hash = await this.hashPassword(pass);
+    if (hash !== account.passwordHash) {
+      throw new Error('Incorrect password. Please try again.');
+    }
+
+    const user: OrganizerAuthUser = {
+      uid: account.uid,
+      email: account.email,
+      displayName: account.displayName,
+      isAnonymous: false,
+    };
+    this.persistLocalSession(user);
+    this.currentUser.set(user);
+    return user;
+  }
+
   private async initFirebase(): Promise<void> {
     try {
       if (typeof window === 'undefined') {
@@ -80,17 +235,19 @@ export class FirebaseService {
       setTimeout(() => this.markAuthReady(), FirebaseService.AUTH_READY_TIMEOUT_MS);
 
       if (!firebaseConfigData || !firebaseConfigData.projectId) {
-        this.connectionStatus.set('offline');
+        this.enableLocalAuthFallback('Firebase project config is missing');
         this.markAuthReady();
         return;
       }
 
-      // Resolve apiKey: injected by SSR server into window.__FIREBASE_API_KEY__
-      const apiKey =
-        (typeof window !== 'undefined' &&
-          (window as Window & { __FIREBASE_API_KEY__?: string }).__FIREBASE_API_KEY__) ||
-        (typeof process !== 'undefined' && process.env?.['FIREBASE_API_KEY']) ||
-        '';
+      // Resolve apiKey: SSR inject, firebase-runtime-config.js (ng serve), or process.env
+      const apiKey = resolveFirebaseApiKey();
+
+      if (!apiKey) {
+        this.enableLocalAuthFallback('Firebase API key is not configured');
+        this.markAuthReady();
+        return;
+      }
 
       const config = { ...firebaseConfigData, apiKey };
 
@@ -109,7 +266,16 @@ export class FirebaseService {
       this.auth = getAuth(this.app);
 
       onAuthStateChanged(this.auth, (user) => {
-        this.currentUser.set(user);
+        this.currentUser.set(
+          user
+            ? {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                isAnonymous: user.isAnonymous,
+              }
+            : null
+        );
         if (user) {
           this.isConnected.set(true);
           this.connectionStatus.set('connected');
@@ -131,9 +297,9 @@ export class FirebaseService {
       this.connectionStatus.set('connected');
     } catch (err: unknown) {
       console.warn('Firebase initialization note (hybrid fallback active):', err);
-      this.isConnected.set(false);
-      this.connectionStatus.set('offline');
-      this.lastError.set(err instanceof Error ? err.message : 'Firebase initialization failed');
+      this.enableLocalAuthFallback(
+        err instanceof Error ? err.message : 'Firebase initialization failed'
+      );
       this.markAuthReady();
     }
   }
@@ -145,13 +311,31 @@ export class FirebaseService {
   }
 
   // Google Sign-In helper (for organizers and presenters)
-  public async signInWithGoogle(): Promise<User | null> {
-    if (!this.auth) return null;
+  public async signInWithGoogle(): Promise<OrganizerAuthUser | null> {
+    if (!this.auth) {
+      throw new Error(
+        'Google sign-in needs Firebase Auth. Add FIREBASE_API_KEY to .env (or Cloud Run secrets), restart the app, then try again. Email/password still works offline via local host accounts.'
+      );
+    }
     try {
+      // Drop any local-only session so Firebase Google identity becomes the source of truth.
+      this.clearLocalSession();
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      provider.addScope('profile');
+      provider.addScope('email');
       const result = await signInWithPopup(this.auth, provider);
-      this.currentUser.set(result.user);
-      return result.user;
+      const user: OrganizerAuthUser = {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        isAnonymous: result.user.isAnonymous,
+      };
+      this.currentUser.set(user);
+      this.localAuthFallback.set(false);
+      this.connectionStatus.set('connected');
+      this.isConnected.set(true);
+      return user;
     } catch (err: unknown) {
       console.warn('Google sign-in error:', err);
       throw err;
@@ -159,12 +343,20 @@ export class FirebaseService {
   }
 
   // Email & Password Sign In for Organizers
-  public async signInWithEmail(email: string, pass: string): Promise<User | null> {
-    if (!this.auth) return null;
+  public async signInWithEmail(email: string, pass: string): Promise<OrganizerAuthUser | null> {
+    if (!this.auth) {
+      return this.signInLocally(email, pass);
+    }
     try {
       const result = await signInWithEmailAndPassword(this.auth, email.trim(), pass);
-      this.currentUser.set(result.user);
-      return result.user;
+      const user: OrganizerAuthUser = {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        isAnonymous: result.user.isAnonymous,
+      };
+      this.currentUser.set(user);
+      return user;
     } catch (err: unknown) {
       console.warn('Email sign-in error:', err);
       throw err;
@@ -172,15 +364,27 @@ export class FirebaseService {
   }
 
   // Email & Password Sign Up for Organizers
-  public async signUpWithEmail(email: string, pass: string, displayName?: string): Promise<User | null> {
-    if (!this.auth) return null;
+  public async signUpWithEmail(
+    email: string,
+    pass: string,
+    displayName?: string
+  ): Promise<OrganizerAuthUser | null> {
+    if (!this.auth) {
+      return this.signUpLocally(email, pass, displayName);
+    }
     try {
       const result = await createUserWithEmailAndPassword(this.auth, email.trim(), pass);
       if (displayName && result.user) {
         await updateProfile(result.user, { displayName });
       }
-      this.currentUser.set(result.user);
-      return result.user;
+      const user: OrganizerAuthUser = {
+        uid: result.user.uid,
+        email: result.user.email,
+        displayName: displayName || result.user.displayName,
+        isAnonymous: result.user.isAnonymous,
+      };
+      this.currentUser.set(user);
+      return user;
     } catch (err: unknown) {
       console.warn('Email sign-up error:', err);
       throw err;
@@ -189,13 +393,18 @@ export class FirebaseService {
 
   // Sign out
   public async logOut(): Promise<void> {
-    if (!this.auth) return;
+    this.clearLocalSession();
+    if (!this.auth) {
+      this.currentUser.set(null);
+      return;
+    }
     try {
       await signOut(this.auth);
       this.currentUser.set(null);
       await signInAnonymously(this.auth);
     } catch (err) {
       console.warn('Sign out error:', err);
+      this.currentUser.set(null);
     }
   }
 
@@ -423,6 +632,214 @@ export class FirebaseService {
     } catch (err) {
       console.warn('Firestore deleteQuestion note:', err);
       return false;
+    }
+  }
+
+  // --- Series / Segment persistence (structured Firestore layout) ---
+  //
+  // series/{JOINCODE}                      series metadata (no raw Gemini key)
+  // series/{JOINCODE}/segments/{segId}     talk + nested speaker profile
+  // speakerInvites/{email}/claims/{id}     email → segment claim index
+
+  /**
+   * Persist a full series document + every segment in one batch.
+   * Does NOT write geminiApiKey (server-only secret).
+   */
+  public async syncSeriesToFirestore(
+    series: Series | SessionSeries,
+    options?: { hasCustomGeminiKey?: boolean }
+  ): Promise<boolean> {
+    if (!this.db || !series?.joinCode) return false;
+
+    try {
+      const joinCode = series.joinCode.toUpperCase().trim();
+      const nowIso = new Date().toISOString();
+      const batch = writeBatch(this.db);
+      const seriesRef = doc(this.db, 'series', joinCode);
+      const seriesDoc = toFirestoreSeries(series, {
+        hasCustomGeminiKey: options?.hasCustomGeminiKey,
+        creatorUid: this.currentUser()?.uid || series.creatorUid,
+      });
+
+      batch.set(seriesRef, seriesDoc, { merge: true });
+
+      for (const seg of series.segments || []) {
+        const segDoc = toFirestoreSegment({ id: series.id, joinCode }, seg, nowIso);
+        const segRef = doc(this.db, 'series', joinCode, 'segments', seg.id);
+        batch.set(segRef, segDoc, { merge: true });
+
+        if (segDoc.speaker.email) {
+          const inviteRef = doc(
+            this.db,
+            'speakerInvites',
+            normalizeInviteEmail(segDoc.speaker.email),
+            'claims',
+            speakerInviteDocId(joinCode, seg.id)
+          );
+          const claim: FirestoreSpeakerInviteClaim = {
+            joinCode,
+            seriesTitle: seriesDoc.title,
+            seriesState: seriesDoc.state,
+            segmentId: seg.id,
+            segmentTitle: segDoc.title,
+            speakerName: segDoc.speaker.name,
+            speakerEmail: segDoc.speaker.email,
+            adminToken: segDoc.adminToken,
+            status: segDoc.status,
+            order: segDoc.order,
+            updatedAt: nowIso,
+          };
+          batch.set(inviteRef, claim, { merge: true });
+        }
+      }
+
+      // Keep the mirrored session shell in sync for Q&A listeners
+      const sessionRef = doc(this.db, 'sessions', joinCode);
+      batch.set(
+        sessionRef,
+        {
+          id: series.id || joinCode,
+          joinCode,
+          title: seriesDoc.title,
+          description: seriesDoc.description,
+          isActive: seriesDoc.state === 'LIVE' || seriesDoc.state === 'SCHEDULED',
+          type: 'series',
+          seriesId: series.id || joinCode,
+          updatedAt: nowIso,
+          createdAt: seriesDoc.createdAt,
+        },
+        { merge: true }
+      );
+
+      await batch.commit();
+      return true;
+    } catch (err) {
+      console.warn('Firestore syncSeries note:', err);
+      return false;
+    }
+  }
+
+  /** Persist one segment (+ speaker invite index when email present). */
+  public async syncSegmentToFirestore(
+    series: Pick<Series, 'id' | 'joinCode' | 'title' | 'state'>,
+    seg: Segment
+  ): Promise<boolean> {
+    if (!this.db || !series?.joinCode || !seg?.id) return false;
+
+    try {
+      const joinCode = series.joinCode.toUpperCase().trim();
+      const nowIso = new Date().toISOString();
+      const segDoc = toFirestoreSegment({ id: series.id, joinCode }, seg, nowIso);
+      const batch = writeBatch(this.db);
+
+      batch.set(doc(this.db, 'series', joinCode, 'segments', seg.id), segDoc, { merge: true });
+      batch.set(
+        doc(this.db, 'series', joinCode),
+        {
+          updatedAt: nowIso,
+          revision: Date.now(),
+        },
+        { merge: true }
+      );
+
+      const email = segDoc.speaker.email;
+      if (email) {
+        const claim: FirestoreSpeakerInviteClaim = {
+          joinCode,
+          seriesTitle: series.title || joinCode,
+          seriesState: series.state || 'SCHEDULED',
+          segmentId: seg.id,
+          segmentTitle: segDoc.title,
+          speakerName: segDoc.speaker.name,
+          speakerEmail: email,
+          adminToken: segDoc.adminToken,
+          status: segDoc.status,
+          order: segDoc.order,
+          updatedAt: nowIso,
+        };
+        batch.set(
+          doc(
+            this.db,
+            'speakerInvites',
+            normalizeInviteEmail(email),
+            'claims',
+            speakerInviteDocId(joinCode, seg.id)
+          ),
+          claim,
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+      return true;
+    } catch (err) {
+      console.warn('Firestore syncSegment note:', err);
+      return false;
+    }
+  }
+
+  /** Load series metadata + segments from Firestore (for cold recovery / merge). */
+  public async loadSeriesFromFirestore(joinCode: string): Promise<{
+    series: Partial<Series>;
+    segments: Segment[];
+  } | null> {
+    if (!this.db) return null;
+    const code = joinCode.toUpperCase().trim();
+
+    try {
+      const seriesSnap = await getDoc(doc(this.db, 'series', code));
+      if (!seriesSnap.exists()) return null;
+
+      const data = seriesSnap.data();
+      const segsSnap = await getDocs(
+        query(collection(this.db, 'series', code, 'segments'), orderBy('order', 'asc'))
+      );
+      const segments = segsSnap.docs.map(d =>
+        fromFirestoreSegment({ ...(d.data() as object), id: d.id }, d.id)
+      );
+
+      return {
+        series: {
+          id: String(data['id'] || code),
+          joinCode: code,
+          seriesCode: String(data['seriesCode'] || code),
+          title: String(data['title'] || 'Workshop Series'),
+          description: String(data['description'] || ''),
+          state: data['state'],
+          timezone: String(data['timezone'] || 'UTC'),
+          startDate: String(data['startDate'] || ''),
+          activeSegmentId: data['activeSegmentId'] || null,
+          liveSegmentId: data['activeSegmentId'] || null,
+          segmentIds: Array.isArray(data['segmentIds']) ? data['segmentIds'] : segments.map(s => s.id),
+          settings: data['settings'],
+          revision: Number(data['revision']) || 1,
+          creatorUid: String(data['creatorUid'] || ''),
+          updatedAt: String(data['updatedAt'] || ''),
+          createdAt: String(data['createdAt'] || ''),
+          segments,
+        } as Partial<Series>,
+        segments,
+      };
+    } catch (err) {
+      console.warn('Firestore loadSeries note:', err);
+      return null;
+    }
+  }
+
+  /** Email-indexed speaker claims (mirrors /api/speaker/invites when online). */
+  public async loadSpeakerInvitesFromFirestore(email: string): Promise<FirestoreSpeakerInviteClaim[]> {
+    if (!this.db) return [];
+    const normalized = normalizeInviteEmail(email);
+    if (!normalized.includes('@')) return [];
+
+    try {
+      const snap = await getDocs(collection(this.db, 'speakerInvites', normalized, 'claims'));
+      return snap.docs
+        .map(d => d.data() as FirestoreSpeakerInviteClaim)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    } catch (err) {
+      console.warn('Firestore loadSpeakerInvites note:', err);
+      return [];
     }
   }
 

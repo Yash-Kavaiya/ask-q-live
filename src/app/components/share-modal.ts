@@ -37,7 +37,7 @@ export const CLOUD_RUN_DEV_URL = 'https://ais-dev-er5cbhqzhrr7gn4nf5ibs2-5834518
           role="dialog"
           aria-modal="true"
           aria-labelledby="share-modal-title"
-          class="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 border border-slate-200/80 shadow-2xl relative my-6 text-left animate-in fade-in zoom-in-95 duration-200 z-10"
+          class="bg-white rounded-3xl max-w-xl w-full max-h-[85vh] overflow-y-auto p-6 sm:p-8 border border-slate-200/80 shadow-2xl relative my-6 text-left animate-in fade-in zoom-in-95 duration-200 z-10"
           [class.max-w-2xl]="isPresenterEnlarged()"
         >
           <!-- Close Button -->

@@ -59,13 +59,13 @@ import { Segment } from '../models/qa.models';
               </button>
 
               <button
-                id="btn-create-new-series-workshop"
+                id="btn-series-manage-tab"
                 type="button"
-                (click)="qaService.leaveSession()"
+                (click)="qaService.navigateToTab('manage')"
                 class="inline-flex items-center px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-                title="Create another workshop series or switch room"
+                title="Series settings, speaker invites, and share"
               >
-                <mat-icon class="text-sm mr-1.5">add_to_photos</mat-icon> Create New Series
+                <mat-icon class="text-sm mr-1.5">settings</mat-icon> Manage
               </button>
             }
           </div>
@@ -242,6 +242,16 @@ import { Segment } from '../models/qa.models';
                     >
                       <mat-icon class="text-sm mr-1">link</mat-icon> Speaker Link
                     </button>
+
+                    @if (seg.speakerEmail) {
+                      <span
+                        class="inline-flex items-center px-2 py-1 text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg"
+                        [title]="'Invited speaker: ' + seg.speakerEmail"
+                      >
+                        <mat-icon class="text-xs mr-1">mail</mat-icon>
+                        {{ seg.speakerEmail }}
+                      </span>
+                    }
 
                     <!-- Edit Segment Button -->
                     <button
@@ -474,6 +484,68 @@ import { Segment } from '../models/qa.models';
               </div>
 
               <div>
+                <label for="input-seg-speaker-email" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Invite Speaker Gmail
+                </label>
+                <input
+                  id="input-seg-speaker-email"
+                  type="email"
+                  formControlName="speakerEmail"
+                  placeholder="speaker@gmail.com"
+                  class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+                <p class="mt-1 text-[11px] text-slate-500">
+                  Speaker signs in with this Gmail as <strong>Speaker</strong> to open only their talk. You can also share the Speaker Link.
+                </p>
+              </div>
+
+              <div>
+                <label for="input-seg-session-description" class="block text-xs font-semibold text-slate-700 mb-1">
+                  Session description
+                </label>
+                <textarea
+                  id="input-seg-session-description"
+                  formControlName="sessionDescription"
+                  rows="2"
+                  placeholder="Public blurb for this talk — what the audience should expect..."
+                  class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                ></textarea>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label for="input-seg-speaker-x" class="block text-xs font-semibold text-slate-700 mb-1">X (Twitter)</label>
+                  <input
+                    id="input-seg-speaker-x"
+                    type="text"
+                    formControlName="speakerX"
+                    placeholder="@handle or url"
+                    class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label for="input-seg-speaker-linkedin" class="block text-xs font-semibold text-slate-700 mb-1">LinkedIn</label>
+                  <input
+                    id="input-seg-speaker-linkedin"
+                    type="text"
+                    formControlName="speakerLinkedIn"
+                    placeholder="linkedin.com/in/…"
+                    class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label for="input-seg-speaker-website" class="block text-xs font-semibold text-slate-700 mb-1">Website</label>
+                  <input
+                    id="input-seg-speaker-website"
+                    type="text"
+                    formControlName="speakerWebsite"
+                    placeholder="https://…"
+                    class="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div>
                 <label for="input-seg-topic-summary" class="block text-xs font-semibold text-slate-700 mb-1">Topic Summary</label>
                 <textarea
                   id="input-seg-topic-summary"
@@ -537,6 +609,11 @@ export class SeriesControlRoom {
     speakerName: ['', Validators.required],
     speakerRole: [''],
     speakerOrg: [''],
+    speakerEmail: [''],
+    speakerX: [''],
+    speakerLinkedIn: [''],
+    speakerWebsite: [''],
+    sessionDescription: [''],
     durationMinutes: [45],
     topicSummary: [''],
     groundingContext: [''],
@@ -567,17 +644,33 @@ export class SeriesControlRoom {
     this.isSubmitting.set(false);
   }
 
-  public copySpeakerLink(seg: Segment): void {
+  public async copySpeakerLink(seg: Segment): Promise<void> {
     const code = this.qaService.currentSeries()?.joinCode || this.qaService.currentSession()?.joinCode;
     if (!code) return;
 
+    const adminToken = await this.qaService.resolveSpeakerAdminToken(seg.id);
+    if (!adminToken) {
+      this.qaService.showToast('Could not resolve speaker token. Re-authenticate as organizer and try again.');
+      return;
+    }
+
+    // Keep token in local series state so subsequent copies work offline of poll wipe
+    const series = this.qaService.currentSeries();
+    if (series?.segments) {
+      this.qaService.currentSeries.set({
+        ...series,
+        segments: series.segments.map(s =>
+          s.id === seg.id ? { ...s, adminToken } : s
+        ),
+      });
+    }
+
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const url = `${origin}/?joinCode=${code}&token=${seg.adminToken}`;
+    const url = `${origin}/?joinCode=${code}&token=${adminToken}`;
 
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => {
-        this.qaService.showToast(`Private Speaker Link copied for ${seg.speakerName}!`);
-      });
+      await navigator.clipboard.writeText(url);
+      this.qaService.showToast(`Private Speaker Link copied for ${seg.speakerName}!`);
     }
   }
 
@@ -586,6 +679,11 @@ export class SeriesControlRoom {
     this.editingSegmentId.set(null);
     this.segmentForm.reset({
       durationMinutes: 45,
+      speakerEmail: '',
+      speakerX: '',
+      speakerLinkedIn: '',
+      speakerWebsite: '',
+      sessionDescription: '',
     });
     this.showSegmentModal.set(true);
   }
@@ -598,6 +696,11 @@ export class SeriesControlRoom {
       speakerName: seg.speakerName,
       speakerRole: seg.speakerRole || '',
       speakerOrg: seg.speakerOrg || '',
+      speakerEmail: seg.speakerEmail || '',
+      speakerX: seg.speakerX || '',
+      speakerLinkedIn: seg.speakerLinkedIn || '',
+      speakerWebsite: seg.speakerWebsite || '',
+      sessionDescription: seg.sessionDescription || seg.topicSummary || '',
       durationMinutes: seg.durationMinutes || 45,
       topicSummary: seg.topicSummary || '',
       groundingContext: seg.groundingContext || '',
@@ -610,27 +713,26 @@ export class SeriesControlRoom {
 
     this.isSubmitting.set(true);
     const formVal = this.segmentForm.value;
+    const sessionDescription = (formVal.sessionDescription || '').trim();
+    const payload = {
+      title: formVal.title || '',
+      speakerName: formVal.speakerName || '',
+      speakerRole: formVal.speakerRole || '',
+      speakerOrg: formVal.speakerOrg || '',
+      speakerEmail: (formVal.speakerEmail || '').trim().toLowerCase(),
+      speakerX: (formVal.speakerX || '').trim(),
+      speakerLinkedIn: (formVal.speakerLinkedIn || '').trim(),
+      speakerWebsite: (formVal.speakerWebsite || '').trim(),
+      sessionDescription,
+      topicSummary: formVal.topicSummary || sessionDescription || '',
+      durationMinutes: formVal.durationMinutes || 45,
+      groundingContext: formVal.groundingContext || '',
+    };
 
     if (this.isEditingSegment() && this.editingSegmentId()) {
-      await this.qaService.updateSegment(this.editingSegmentId()!, {
-        title: formVal.title || '',
-        speakerName: formVal.speakerName || '',
-        speakerRole: formVal.speakerRole || '',
-        speakerOrg: formVal.speakerOrg || '',
-        durationMinutes: formVal.durationMinutes || 45,
-        topicSummary: formVal.topicSummary || '',
-        groundingContext: formVal.groundingContext || '',
-      });
+      await this.qaService.updateSegment(this.editingSegmentId()!, payload);
     } else {
-      await this.qaService.addSegment({
-        title: formVal.title || '',
-        speakerName: formVal.speakerName || '',
-        speakerRole: formVal.speakerRole || '',
-        speakerOrg: formVal.speakerOrg || '',
-        durationMinutes: formVal.durationMinutes || 45,
-        topicSummary: formVal.topicSummary || '',
-        groundingContext: formVal.groundingContext || '',
-      });
+      await this.qaService.addSegment(payload);
     }
 
     this.isSubmitting.set(false);

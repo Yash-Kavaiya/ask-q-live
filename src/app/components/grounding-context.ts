@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
+import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
 
 @Component({
   selector: 'app-grounding-context',
@@ -29,7 +30,7 @@ import { QaService } from '../services/qa.service';
             #fileInputGrounding
             type="file"
             (change)="onFileSelected($event)"
-            accept=".txt,.md,.pdf,.docx,.doc,.pptx,.ppt,.json,.csv"
+            [attr.accept]="groundingFileAccept"
             class="hidden"
           />
           <button
@@ -168,6 +169,7 @@ import { QaService } from '../services/qa.service';
 export class GroundingContext {
   public qaService = inject(QaService);
   public isSaving = signal<boolean>(false);
+  public groundingFileAccept = GROUNDING_FILE_ACCEPT;
 
   // File upload state
   public isDragging = signal<boolean>(false);
@@ -217,45 +219,31 @@ export class GroundingContext {
     this.uploadedFileSize.set(null);
   }
 
-  private processFile(file: File): void {
-    const maxSizeBytes = 25 * 1024 * 1024; // 25MB safety threshold for client text reader
-    if (file.size > maxSizeBytes) {
-      this.qaService.showToast(`File is too large (${this.formatFileSize(file.size)}). Max allowed size is 25MB.`);
-      return;
-    }
-
+  private async processFile(file: File): Promise<void> {
     this.isReadingFile.set(true);
     this.uploadedFileName.set(file.name);
     this.uploadedFileSize.set(this.formatFileSize(file.size));
 
-    const reader = new FileReader();
-
-    reader.onload = (e: ProgressEvent<FileReader>) => {
-      let content = (e.target?.result as string) || '';
-
-      if (file.name.endsWith('.json')) {
-        try {
-          const parsed = JSON.parse(content);
-          content = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
-        } catch {
-          // keep raw string
-        }
-      }
-
+    try {
+      const extracted = await extractGroundingTextFromFile(file);
       const existing = this.contextControl.value || '';
-      const prefix = existing.trim() ? `${existing.trim()}\n\n--- Document: ${file.name} ---\n` : `--- Document: ${file.name} ---\n`;
-      this.contextControl.setValue(prefix + content);
-
+      const prefix = existing.trim()
+        ? `${existing.trim()}\n\n--- Document: ${file.name} ---\n`
+        : `--- Document: ${file.name} ---\n`;
+      this.contextControl.setValue(prefix + extracted.text);
+      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      this.qaService.showToast(
+        `Imported ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+      );
+    } catch (err) {
+      this.uploadedFileName.set(null);
+      this.uploadedFileSize.set(null);
+      this.qaService.showToast(
+        err instanceof Error ? err.message : `Error reading file ${file.name}`
+      );
+    } finally {
       this.isReadingFile.set(false);
-      this.qaService.showToast(`Imported ${content.length} characters from ${file.name}`);
-    };
-
-    reader.onerror = () => {
-      this.isReadingFile.set(false);
-      this.qaService.showToast(`Error reading file ${file.name}`);
-    };
-
-    reader.readAsText(file);
+    }
   }
 
   private formatFileSize(bytes: number): string {

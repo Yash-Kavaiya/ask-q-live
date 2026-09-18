@@ -28,7 +28,29 @@ import {
   generateSeriesExecutiveReport,
   generatePostSessionReport,
 } from './gemini.service.js';
+
 import { timingSafeCompare } from './auth.js';
+
+function normalizeSeriesGeminiKey(raw?: string | null): string | undefined {
+  const key = (raw || '').trim();
+  if (
+    !key ||
+    key.length < 10 ||
+    key === 'MY_GEMINI_API_KEY' ||
+    key === 'TODO' ||
+    key === 'undefined' ||
+    key === 'null'
+  ) {
+    return undefined;
+  }
+  return key;
+}
+
+function normalizeEmail(raw?: string | null): string | undefined {
+  const email = (raw || '').trim().toLowerCase();
+  if (!email || !email.includes('@') || email.length < 5) return undefined;
+  return email;
+}
 
 // Compute text sentiment polarity score (-1.0 to 1.0)
 export function computeTextSentiment(text: string, isSpam = false, isToxic = false): number {
@@ -138,6 +160,60 @@ export class QaStore {
     return Array.from(this.series.values());
   }
 
+  /**
+   * Find all segment invites matching a speaker Gmail / email (case-insensitive).
+   * Returns adminToken so the speaker can claim their green room after sign-in.
+   */
+  public findSpeakerInvitesByEmail(email: string): Array<{
+    joinCode: string;
+    seriesTitle: string;
+    seriesState?: string;
+    segmentId: string;
+    segmentTitle: string;
+    speakerName: string;
+    speakerEmail: string;
+    adminToken: string;
+    status: string;
+    order: number;
+  }> {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return [];
+
+    const invites: Array<{
+      joinCode: string;
+      seriesTitle: string;
+      seriesState?: string;
+      segmentId: string;
+      segmentTitle: string;
+      speakerName: string;
+      speakerEmail: string;
+      adminToken: string;
+      status: string;
+      order: number;
+    }> = [];
+
+    for (const series of this.getAllSeries()) {
+      for (const seg of series.segments || []) {
+        if (normalizeEmail(seg.speakerEmail) === normalized && seg.adminToken) {
+          invites.push({
+            joinCode: series.joinCode,
+            seriesTitle: series.title,
+            seriesState: series.state,
+            segmentId: seg.id,
+            segmentTitle: seg.title,
+            speakerName: seg.speakerName,
+            speakerEmail: normalized,
+            adminToken: seg.adminToken,
+            status: seg.status,
+            order: seg.order,
+          });
+        }
+      }
+    }
+
+    return invites.sort((a, b) => a.order - b.order);
+  }
+
   public getActiveLiveRoom(): { series?: Series; session?: Session } | null {
     const allSeries = Array.from(this.series.values());
     const liveSeries = allSeries.find(s => s.state === 'LIVE') || allSeries[0];
@@ -167,6 +243,7 @@ export class QaStore {
     customSeriesCode?: string;
     customJoinCode?: string;
     organizerToken?: string;
+    geminiApiKey?: string;
     settings?: Partial<SeriesSettings>;
     segments?: Partial<Segment>[];
   }): Series {
@@ -250,6 +327,9 @@ export class QaStore {
           bio: seg.speakerBio,
           org: seg.speakerOrg,
           avatarUrl: seg.speakerAvatar,
+          xUrl: seg.speakerX,
+          linkedinUrl: seg.speakerLinkedIn,
+          websiteUrl: seg.speakerWebsite,
         },
         talkTitle: seg.talkTitle || seg.title || `Talk ${segOrder}`,
         type: seg.type || 'TALK',
@@ -267,6 +347,12 @@ export class QaStore {
         contextData: seg.contextData || seg.groundingContext || '',
         categories: seg.categories && seg.categories.length > 0 ? seg.categories : ['General'],
         adminToken: segToken,
+        speakerEmail: normalizeEmail(seg.speakerEmail),
+        speakerX: (seg.speakerX || '').trim() || undefined,
+        speakerLinkedIn: (seg.speakerLinkedIn || '').trim() || undefined,
+        speakerWebsite: (seg.speakerWebsite || '').trim() || undefined,
+        sessionDescription: (seg.sessionDescription || seg.topicSummary || '').trim() || undefined,
+        topicSummary: seg.topicSummary || seg.sessionDescription,
         order: segOrder,
         graceWindowMinutes: seg.graceWindowMinutes ?? defaultSettings.graceWindowMinutes,
         moderationSensitivity: seg.moderationSensitivity || defaultSettings.defaultModerationSensitivity,
@@ -320,6 +406,7 @@ export class QaStore {
       description: params.description,
       contextData: params.contextData || params.seriesContextData,
       seriesContextData: params.seriesContextData || params.contextData,
+      geminiApiKey: normalizeSeriesGeminiKey(params.geminiApiKey),
       startDate: params.startDate || params.date || nowIso.split('T')[0],
       date: params.date || params.startDate || nowIso.split('T')[0],
       timezone: params.timezone || 'UTC',
@@ -449,6 +536,10 @@ export class QaStore {
         name: data.speakerName || 'Speaker',
         title: data.speakerRole,
         bio: data.speakerBio,
+        org: data.speakerOrg,
+        xUrl: data.speakerX,
+        linkedinUrl: data.speakerLinkedIn,
+        websiteUrl: data.speakerWebsite,
       },
       talkTitle: data.talkTitle || data.title || `Talk ${order}`,
       type: data.type || 'TALK',
@@ -462,6 +553,12 @@ export class QaStore {
       contextData: data.contextData || data.groundingContext || '',
       categories: data.categories || ['General'],
       adminToken,
+      speakerEmail: normalizeEmail(data.speakerEmail),
+      speakerX: (data.speakerX || '').trim() || undefined,
+      speakerLinkedIn: (data.speakerLinkedIn || '').trim() || undefined,
+      speakerWebsite: (data.speakerWebsite || '').trim() || undefined,
+      sessionDescription: (data.sessionDescription || data.topicSummary || '').trim() || undefined,
+      topicSummary: data.topicSummary || data.sessionDescription,
       order,
       graceWindowMinutes: data.graceWindowMinutes ?? series.settings.graceWindowMinutes,
       moderationSensitivity: data.moderationSensitivity || series.settings.defaultModerationSensitivity,
@@ -1189,7 +1286,9 @@ export class QaStore {
 
       const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
-      generateTwoLineAnswer(newQuestion.content, mergedGrounding)
+      generateTwoLineAnswer(newQuestion.content, mergedGrounding, {
+        apiKey: series?.geminiApiKey,
+      })
         .then(aiResult => {
           newQuestion.aiLine1 = aiResult.firstLine;
           newQuestion.aiLine2 = aiResult.secondLine;
@@ -1504,7 +1603,9 @@ export class QaStore {
       const grounding = targetSeg?.groundingContext || session?.contextData || series?.seriesContextData;
 
       question.aiStatus = 'GENERATING';
-      generateTwoLineAnswer(question.content, grounding)
+      generateTwoLineAnswer(question.content, grounding, {
+        apiKey: series?.geminiApiKey,
+      })
         .then(aiResult => {
           newQuestionLine(question, aiResult);
         })
@@ -1945,7 +2046,8 @@ export class QaStore {
         const generated = await generatePostSessionReport(
           `${seg.speakerName} — ${seg.title}`,
           seg.groundingContext || seg.contextData || '',
-          segQuestions
+          segQuestions,
+          series.geminiApiKey
         );
         segReport = {
           sessionTitle: `${seg.speakerName} — ${seg.title}`,
@@ -1981,7 +2083,8 @@ export class QaStore {
     const report = await generateSeriesExecutiveReport(
       series.title,
       series.contextData || series.seriesContextData || '',
-      speakersForGemini
+      speakersForGemini,
+      series.geminiApiKey
     );
 
     const speakerComparisons: SpeakerComparison[] = series.segments.map(seg => {
@@ -3212,7 +3315,9 @@ export class QaStore {
     const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
     try {
-      const aiResult = await generateTwoLineAnswer(q.content, mergedGrounding);
+      const aiResult = await generateTwoLineAnswer(q.content, mergedGrounding, {
+        apiKey: series?.geminiApiKey,
+      });
       q.aiLine1 = aiResult.firstLine;
       q.aiLine2 = aiResult.secondLine;
       q.aiConfidence = aiResult.confidenceScore;

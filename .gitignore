@@ -4,6 +4,9 @@
 .env*
 !.env.example
 
+# Local Firebase key injection for ng serve (generated from .env)
+/public/firebase-runtime-config.js
+
 # Compiled output
 /dist
 /tmp
@@ -47,6 +50,9 @@ yarn-error.log
 testem.log
 /typings
 __screenshots__/
+
+# Claude in Chrome browser automation scratch output (console logs, page snapshots)
+.playwright-mcp/
 
 # System files
 .DS_Store

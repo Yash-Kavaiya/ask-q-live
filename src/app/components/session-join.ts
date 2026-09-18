@@ -5,6 +5,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
 import { HostedSessionRecord, ModerationSensitivity, Segment, SegmentType } from '../models/qa.models';
+import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
 
 interface SegmentDraft {
   id: string;
@@ -333,8 +334,8 @@ interface SegmentDraft {
               id="btn-google-signin"
               type="button"
               (click)="signInGoogle()"
-              [disabled]="isAuthLoading()"
-              class="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs mb-4"
+              [disabled]="isAuthLoading() || firebaseService.localAuthFallback()"
+              class="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs mb-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg class="w-4 h-4" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -342,8 +343,14 @@ interface SegmentDraft {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
               </svg>
-              <span>Continue with Google</span>
+              <span>{{ firebaseService.localAuthFallback() ? 'Google (needs Firebase Auth)' : 'Continue with Google' }}</span>
             </button>
+
+            @if (firebaseService.localAuthFallback()) {
+              <div class="p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                Firebase Auth is offline. Email/password still works as a local host account. Set <code class="font-mono">FIREBASE_API_KEY</code> for Google sign-in.
+              </div>
+            }
 
             <div class="relative flex items-center justify-center mb-4">
               <div class="border-t border-slate-200 w-full"></div>
@@ -532,6 +539,32 @@ interface SegmentDraft {
             <!-- ================= WORKSHOP SERIES CREATION FORM ================= -->
             @if (modalMode() === 'series') {
               <form [formGroup]="seriesForm" (ngSubmit)="onCreateSeriesSubmit()" class="space-y-5">
+
+                <div class="p-3.5 rounded-xl border border-amber-200 bg-amber-50/80 space-y-2">
+                  <label for="join-series-gemini-key" class="block text-xs font-bold text-amber-950 uppercase tracking-wider">
+                    Gemini API Key (optional)
+                  </label>
+                  <p class="text-[11px] text-amber-900/80 leading-relaxed">
+                    Provide your Gemini API key for this workshop. Leave blank to use the platform key.
+                  </p>
+                  <div class="relative">
+                    <input
+                      id="join-series-gemini-key"
+                      [type]="showSeriesGeminiKey() ? 'text' : 'password'"
+                      formControlName="geminiApiKey"
+                      placeholder="AIzaSy… (optional)"
+                      autocomplete="off"
+                      class="w-full pl-3.5 pr-10 py-2.5 bg-white border border-amber-200 focus:border-indigo-600 rounded-xl text-xs text-slate-900 outline-none font-mono"
+                    />
+                    <button
+                      type="button"
+                      (click)="showSeriesGeminiKey.set(!showSeriesGeminiKey())"
+                      class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <mat-icon class="text-base">{{ showSeriesGeminiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                    </button>
+                  </div>
+                </div>
                 
                 <!-- Workshop Title -->
                 <div>
@@ -652,7 +685,7 @@ interface SegmentDraft {
                     #seriesFileInput
                     type="file"
                     (change)="onSeriesFileSelected($event)"
-                    accept=".txt,.md,.pdf,.docx,.doc,.pptx,.ppt,.json,.csv"
+                    [attr.accept]="groundingFileAccept"
                     class="hidden"
                   />
 
@@ -912,7 +945,7 @@ interface SegmentDraft {
                     id="grounding-file-input"
                     type="file"
                     (change)="onFileSelected($event)"
-                    accept=".txt,.md,.pdf,.docx,.doc,.pptx,.ppt,.json,.csv"
+                    [attr.accept]="groundingFileAccept"
                     class="hidden"
                   />
 
@@ -1033,6 +1066,7 @@ export class SessionJoin implements OnInit {
   // File upload state for single session
   public isDragging = signal<boolean>(false);
   public isReadingFile = signal<boolean>(false);
+  public groundingFileAccept = GROUNDING_FILE_ACCEPT;
   public uploadedFileName = signal<string | null>(null);
   public uploadedFileSize = signal<string | null>(null);
 
@@ -1153,7 +1187,10 @@ export class SessionJoin implements OnInit {
     timezone: new FormControl('America/Los_Angeles (PST)'),
     seriesContextData: new FormControl(''),
     autoAdvance: new FormControl(false),
+    geminiApiKey: new FormControl(''),
   });
+
+  public showSeriesGeminiKey = signal<boolean>(false);
 
   public ngOnInit(): void {
     const savedName = this.qaService.userName();
@@ -1210,7 +1247,10 @@ export class SessionJoin implements OnInit {
   }
 
   public async submitEmailAuth(): Promise<void> {
-    if (this.authForm.invalid) return;
+    if (this.authForm.invalid) {
+      this.authError.set('Please provide a valid email and a password of at least 6 characters.');
+      return;
+    }
     this.isAuthLoading.set(true);
     this.authError.set(null);
 
@@ -1227,9 +1267,18 @@ export class SessionJoin implements OnInit {
       }
 
       if (user) {
+        this.qaService.userRole.set('organizer');
+        this.qaService.userName.set(user.displayName || name || email.split('@')[0]);
+        this.qaService.userAuthToken.set('token-' + user.uid);
         this.showAuthModal.set(false);
         this.showCreateModal.set(true);
         this.qaService.showToast(`Signed in as ${user.displayName || user.email}!`);
+      } else {
+        this.authError.set(
+          this.isSignUpMode()
+            ? 'Account creation failed. Please try again.'
+            : 'Sign-in failed. Please check your email and password.'
+        );
       }
     } catch (err: unknown) {
       this.authError.set(err instanceof Error ? err.message : 'Authentication failed');
@@ -1437,51 +1486,36 @@ export class SessionJoin implements OnInit {
     this.uploadedFileSize.set(null);
   }
 
-  private processFile(file: File, target: 'single' | 'series'): void {
-    const maxSizeBytes = 25 * 1024 * 1024; // 25MB safety threshold for client text reader
-    if (file.size > maxSizeBytes) {
-      this.qaService.showToast(`File is too large (${this.formatFileSize(file.size)}). Max allowed size is 25MB.`);
-      return;
-    }
-
+  private async processFile(file: File, target: 'single' | 'series'): Promise<void> {
     this.isReadingFile.set(true);
     this.uploadedFileName.set(file.name);
     this.uploadedFileSize.set(this.formatFileSize(file.size));
 
-    const reader = new FileReader();
-
-    reader.onload = (e: ProgressEvent<FileReader>) => {
-      let content = (e.target?.result as string) || '';
-
-      if (file.name.endsWith('.json')) {
-        try {
-          const parsed = JSON.parse(content);
-          content = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
-        } catch {
-          // keep as raw text
-        }
-      }
-
+    try {
+      const extracted = await extractGroundingTextFromFile(file);
+      const prefixLabel = `--- Document: ${file.name} ---\n`;
       if (target === 'series') {
         const existing = this.seriesForm.get('seriesContextData')?.value || '';
-        const prefix = existing.trim() ? `${existing.trim()}\n\n--- Document: ${file.name} ---\n` : `--- Document: ${file.name} ---\n`;
-        this.seriesForm.patchValue({ seriesContextData: prefix + content });
+        const prefix = existing.trim() ? `${existing.trim()}\n\n${prefixLabel}` : prefixLabel;
+        this.seriesForm.patchValue({ seriesContextData: prefix + extracted.text });
       } else {
         const existing = this.createForm.get('contextData')?.value || '';
-        const prefix = existing.trim() ? `${existing.trim()}\n\n--- Document: ${file.name} ---\n` : `--- Document: ${file.name} ---\n`;
-        this.createForm.patchValue({ contextData: prefix + content });
+        const prefix = existing.trim() ? `${existing.trim()}\n\n${prefixLabel}` : prefixLabel;
+        this.createForm.patchValue({ contextData: prefix + extracted.text });
       }
-
+      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      this.qaService.showToast(
+        `Extracted ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+      );
+    } catch (err) {
+      this.uploadedFileName.set(null);
+      this.uploadedFileSize.set(null);
+      this.qaService.showToast(
+        err instanceof Error ? err.message : `Error reading file ${file.name}`
+      );
+    } finally {
       this.isReadingFile.set(false);
-      this.qaService.showToast(`Extracted ${content.length} characters from ${file.name}`);
-    };
-
-    reader.onerror = () => {
-      this.isReadingFile.set(false);
-      this.qaService.showToast(`Error reading file ${file.name}`);
-    };
-
-    reader.readAsText(file);
+    }
   }
 
   private formatFileSize(bytes: number): string {
@@ -1515,6 +1549,7 @@ export class SessionJoin implements OnInit {
       timezone: val.timezone || undefined,
       autoAdvance: val.autoAdvance ?? false,
       customJoinCode: val.customJoinCode?.trim().toUpperCase() || undefined,
+      geminiApiKey: (val.geminiApiKey || '').trim() || undefined,
       segments: segmentsPayload,
     });
 

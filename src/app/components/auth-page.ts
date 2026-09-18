@@ -165,8 +165,8 @@ import { UserRole } from '../models/qa.models';
           id="btn-auth-google"
           type="button"
           (click)="signInGoogle()"
-          [disabled]="isLoading()"
-          class="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 font-semibold text-xs text-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs mb-5"
+          [disabled]="isLoading() || firebaseService.localAuthFallback()"
+          class="w-full py-2.5 px-4 rounded-xl border border-slate-300 hover:bg-slate-50 font-semibold text-xs text-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs mb-5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -174,8 +174,15 @@ import { UserRole } from '../models/qa.models';
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
             <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
           </svg>
-          <span>Continue with Google</span>
+          <span>{{ firebaseService.localAuthFallback() ? 'Google (needs Firebase Auth)' : 'Continue with Google' }}</span>
         </button>
+
+        @if (firebaseService.localAuthFallback()) {
+          <div class="mb-5 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+            Firebase Auth is offline (missing API key). Email/password still creates a <strong>local</strong> host account on this device.
+            For Google sign-in and production accounts, set <code class="font-mono">FIREBASE_API_KEY</code> and restart.
+          </div>
+        }
 
         <div class="relative flex items-center justify-center mb-5">
           <div class="border-t border-slate-200 w-full"></div>
@@ -317,11 +324,18 @@ export class AuthPage {
         this.qaService.userRole.set(this.selectedRole());
         this.qaService.userName.set(user.displayName || user.email?.split('@')[0] || 'Organizer');
         this.qaService.userAuthToken.set('token-' + user.uid);
-        this.qaService.showToast(`Signed in as ${user.displayName || user.email} (${this.getRoleDisplayName()})`);
-        this.qaService.navigateToHostStudio();
+        if (user.email) {
+          this.qaService.setAttendeeIdentity(
+            user.displayName || user.email.split('@')[0],
+            user.email
+          );
+        }
+        await this.finishStaffSignIn(user.email || undefined);
+      } else {
+        this.errorMessage.set('Google sign-in did not complete. Please try again.');
       }
     } catch (err: unknown) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Google sign-in failed');
+      this.errorMessage.set(this.formatAuthError(err, 'Google sign-in failed'));
     } finally {
       this.isLoading.set(false);
     }
@@ -334,7 +348,10 @@ export class AuthPage {
     }
 
     const { email, password, name } = this.authForm.value;
-    if (!email || !password) return;
+    if (!email || !password) {
+      this.errorMessage.set('Please provide a valid email and a password of at least 6 characters.');
+      return;
+    }
 
     this.isLoading.set(true);
     this.errorMessage.set(null);
@@ -344,25 +361,88 @@ export class AuthPage {
         const user = await this.firebaseService.signUpWithEmail(email, password, name || undefined);
         if (user) {
           this.qaService.userRole.set(this.selectedRole());
-          this.qaService.userName.set(name || email.split('@')[0]);
+          this.qaService.setAttendeeIdentity(name || email.split('@')[0], email);
           this.qaService.userAuthToken.set('token-' + user.uid);
-          this.qaService.showToast(`Account created! Welcome to Host Studio.`);
-          this.qaService.navigateToHostStudio();
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('live_qa_auth_token', 'token-' + user.uid);
+          }
+          await this.finishStaffSignIn(email);
+        } else {
+          this.errorMessage.set('Account creation failed. Please try again.');
         }
       } else {
         const user = await this.firebaseService.signInWithEmail(email, password);
         if (user) {
           this.qaService.userRole.set(this.selectedRole());
-          this.qaService.userName.set(user.displayName || email.split('@')[0]);
+          this.qaService.setAttendeeIdentity(
+            user.displayName || email.split('@')[0],
+            user.email || email
+          );
           this.qaService.userAuthToken.set('token-' + user.uid);
-          this.qaService.showToast(`Welcome back, ${user.displayName || email}!`);
-          this.qaService.navigateToHostStudio();
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem('live_qa_auth_token', 'token-' + user.uid);
+          }
+          await this.finishStaffSignIn(user.email || email);
+        } else {
+          this.errorMessage.set('Sign-in failed. Please check your email and password.');
         }
       }
     } catch (err: unknown) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Authentication failed. Please check credentials.');
+      this.errorMessage.set(this.formatAuthError(err, 'Authentication failed. Please check credentials.'));
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private async finishStaffSignIn(email?: string): Promise<void> {
+    if (this.selectedRole() === 'speaker' && email) {
+      const invites = await this.qaService.fetchSpeakerInvites(email);
+      if (invites.length === 1) {
+        this.qaService.showToast(`Welcome! Opening your talk: ${invites[0].segmentTitle}`);
+        await this.qaService.joinAsInvitedSpeaker(invites[0]);
+        return;
+      }
+      if (invites.length > 1) {
+        this.qaService.showToast(`Found ${invites.length} invited talks. Pick one in Speaker Studio.`);
+      } else {
+        this.qaService.showToast('Signed in as Speaker. No invites yet — ask the host to register your Gmail.');
+      }
+    } else {
+      this.qaService.showToast(`Signed in as ${this.getRoleDisplayName()}`);
+    }
+    this.qaService.navigateToHostStudio();
+  }
+
+  private formatAuthError(err: unknown, fallback: string): string {
+    if (!(err instanceof Error)) return fallback;
+    const msg = err.message || fallback;
+    if (msg.includes('auth/email-already-in-use')) {
+      return 'An account with this email already exists. Try signing in instead.';
+    }
+    if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) {
+      return 'Incorrect email or password. Please try again.';
+    }
+    if (msg.includes('auth/weak-password')) {
+      return 'Password is too weak. Use at least 6 characters.';
+    }
+    if (msg.includes('auth/invalid-email')) {
+      return 'Please enter a valid email address.';
+    }
+    if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
+      return 'Google sign-in was cancelled. Click Continue with Google again when ready.';
+    }
+    if (msg.includes('auth/popup-blocked')) {
+      return 'Pop-up blocked. Allow pop-ups for this site and try Google sign-in again.';
+    }
+    if (msg.includes('auth/unauthorized-domain')) {
+      return 'This domain is not authorized for Firebase Auth. Add it under Authentication → Settings → Authorized domains.';
+    }
+    if (msg.includes('auth/operation-not-allowed')) {
+      return 'Google sign-in is disabled in Firebase Console. Enable Authentication → Sign-in method → Google.';
+    }
+    if (msg.includes('auth/account-exists-with-different-credential')) {
+      return 'An account already exists with this email using a different sign-in method. Try email/password instead.';
+    }
+    return msg;
   }
 }

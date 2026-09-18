@@ -4,7 +4,8 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
-import { HostedSessionRecord, SegmentType } from '../models/qa.models';
+import { HostedSessionRecord, SegmentType, SpeakerInviteRecord } from '../models/qa.models';
+import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
 
 export interface SegmentDraft {
   id: string;
@@ -12,6 +13,7 @@ export interface SegmentDraft {
   speakerName: string;
   speakerRole?: string;
   speakerOrg?: string;
+  speakerEmail?: string;
   topicSummary?: string;
   durationMinutes: number;
   startTime?: string;
@@ -40,14 +42,18 @@ export interface SegmentDraft {
           </button>
           <div class="flex items-center gap-2.5">
             <h1 class="font-display font-bold text-2xl sm:text-3xl text-slate-900 tracking-tight">
-              Host &amp; Organizer Studio
+              {{ qaService.userRole() === 'speaker' ? 'Speaker Studio' : 'Host & Organizer Studio' }}
             </h1>
             <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-              Enterprise
+              {{ qaService.userRole() === 'speaker' ? 'Speaker' : 'Enterprise' }}
             </span>
           </div>
           <p class="text-xs text-slate-500 mt-1">
-            Create events, manage multi-speaker workshop series, and resume stage controls.
+            @if (qaService.userRole() === 'speaker') {
+              Your invited talks appear below. Open one to enter your green room and teleprompter.
+            } @else {
+              Create events, manage multi-speaker workshop series, and resume stage controls.
+            }
           </p>
         </div>
 
@@ -76,7 +82,8 @@ export interface SegmentDraft {
         </div>
       </div>
 
-      <!-- Quick Action Cards: Launch New Events -->
+      <!-- Quick Action Cards: Launch New Events (organizers only) -->
+      @if (qaService.userRole() !== 'speaker') {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         <!-- Action 1: Create Workshop Series -->
@@ -88,15 +95,15 @@ export interface SegmentDraft {
               <div class="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center">
                 <mat-icon class="text-indigo-300 text-2xl">view_timeline</mat-icon>
               </div>
-              <span class="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-300 border border-indigo-400/30">
-                Flagship Feature
+              <span class="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                Host Gemini Key
               </span>
             </div>
 
             <div>
               <h2 class="font-display font-bold text-xl text-white">Create Multi-Speaker Series</h2>
               <p class="text-indigo-200/80 text-xs leading-relaxed mt-1">
-                Single master URL for attendees. Organize talks, speaker assignments, live stage teleprompters, and automatic segment routing.
+                Single master URL for attendees. After launch, use the in-room <strong class="text-white">Manage</strong> tab for invites, Gemini key, and speaker links.
               </p>
             </div>
 
@@ -121,15 +128,15 @@ export interface SegmentDraft {
             <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
               <mat-icon class="text-indigo-600 text-2xl">podium</mat-icon>
             </div>
-            <span class="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-              Quick Setup
+            <span class="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Free
             </span>
           </div>
 
           <div>
             <h2 class="font-display font-bold text-xl text-slate-900">Create Single Keynote Session</h2>
             <p class="text-slate-500 text-xs leading-relaxed mt-1">
-              Ideal for stand-alone webinars, AMAs, executive addresses, or guest speaker lectures with AI grounded answers.
+              Free to create — no Gemini API key needed. Ideal for stand-alone webinars, AMAs, and keynotes with platform AI grounding.
             </p>
           </div>
 
@@ -148,8 +155,79 @@ export interface SegmentDraft {
         </div>
 
       </div>
+      }
+
+      <!-- ================= SPEAKER INVITES (Gmail claim) ================= -->
+      @if (qaService.userRole() === 'speaker') {
+        <div id="studio-speaker-invites" class="bg-white rounded-2xl p-6 sm:p-8 border border-[#E0E2EC] shadow-xs space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+                <mat-icon class="text-xl">record_voice_over</mat-icon>
+              </div>
+              <div>
+                <h2 class="font-display font-bold text-lg text-slate-900">Your Invited Talks</h2>
+                <p class="text-xs text-slate-500">
+                  Talks where the host registered
+                  <strong class="text-slate-700">{{ qaService.userEmail() || 'your Gmail' }}</strong>.
+                  Open one to enter your speaker green room.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              (click)="refreshSpeakerInvites()"
+              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 cursor-pointer"
+            >
+              <mat-icon class="text-sm">refresh</mat-icon>
+              Refresh Invites
+            </button>
+          </div>
+
+          @if (qaService.speakerInvites().length === 0) {
+            <div class="text-center py-12 px-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+              <div class="w-12 h-12 rounded-2xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                <mat-icon class="text-2xl">mail_outline</mat-icon>
+              </div>
+              <h3 class="font-display font-bold text-sm text-slate-800">No invited talks yet</h3>
+              <p class="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                Ask the host to add your Gmail on your segment (Invite Speaker Gmail), or open the Speaker Link they shared.
+              </p>
+            </div>
+          } @else {
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              @for (invite of qaService.speakerInvites(); track invite.segmentId + invite.joinCode) {
+                <div class="p-5 rounded-2xl border border-amber-200 bg-amber-50/40 hover:bg-white hover:border-amber-400 hover:shadow-md transition-all space-y-3">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-sm font-bold px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-900">
+                      #{{ invite.joinCode }}
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">
+                      {{ invite.status }}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 class="font-display font-bold text-base text-slate-900 leading-snug">{{ invite.segmentTitle }}</h3>
+                    <p class="text-xs text-slate-500 mt-0.5">{{ invite.seriesTitle }} · {{ invite.speakerName }}</p>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="openSpeakerInvite(invite)"
+                    [disabled]="qaService.isLoading()"
+                    class="w-full py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <mat-icon class="text-sm">mic</mat-icon>
+                    <span>Open My Green Room</span>
+                  </button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
 
       <!-- ================= PAST HOSTED SESSIONS SECTION ================= -->
+      @if (qaService.userRole() !== 'speaker') {
       <div id="studio-past-sessions" class="bg-white rounded-2xl p-6 sm:p-8 border border-[#E0E2EC] shadow-xs space-y-5">
         
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
@@ -162,7 +240,7 @@ export interface SegmentDraft {
                 Past Hosted Sessions &amp; Events
               </h2>
               <p class="text-xs text-slate-500">
-                Your previously created events. Re-enter as host with organizer credentials or share QR codes with attendees.
+                Re-enter as host. For a live series, use the in-room Manage tab for invites and settings.
               </p>
             </div>
           </div>
@@ -183,7 +261,6 @@ export interface SegmentDraft {
           }
         </div>
 
-        <!-- Sessions List -->
         @if (qaService.hostedSessions().length === 0) {
           <div class="text-center py-12 px-4 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
             <div class="w-12 h-12 rounded-2xl bg-white border border-slate-200 text-slate-400 flex items-center justify-center mx-auto mb-3">
@@ -195,7 +272,7 @@ export interface SegmentDraft {
             </p>
             <button
               type="button"
-              (click)="openCreateModal('series')"
+              (click)="openCreateModal('single')"
               class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs cursor-pointer shadow-2xs"
             >
               <mat-icon class="text-sm">add_circle</mat-icon>
@@ -289,6 +366,7 @@ export interface SegmentDraft {
         }
 
       </div>
+      }
 
       <!-- ================= CREATE SESSION / WORKSHOP MODAL ================= -->
       @if (showCreateModal()) {
@@ -313,7 +391,7 @@ export interface SegmentDraft {
                   {{ modalMode() === 'series' ? 'Launch Multi-Speaker Workshop Series' : 'Create Single Presentation Session' }}
                 </h2>
                 <p class="text-xs text-slate-500">
-                  {{ modalMode() === 'series' ? 'Multi-talk event with master attendee URL & teleprompters' : 'Instant Q&A feed with grounded AI synthesis' }}
+                  {{ modalMode() === 'series' ? 'Optional host Gemini API key · leave blank to use platform key' : 'Free — no API key required' }}
                 </p>
               </div>
             </div>
@@ -321,6 +399,9 @@ export interface SegmentDraft {
             <!-- Single Session Form -->
             @if (modalMode() === 'single') {
               <form [formGroup]="singleForm" (ngSubmit)="submitCreateSingle()" class="space-y-4">
+                <div class="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 leading-relaxed">
+                  <strong>Free session.</strong> AI answers and grounding use the platform Gemini key — you do not need to provide one.
+                </div>
                 <div>
                   <label for="single-title-input" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                     Session Title *
@@ -402,7 +483,7 @@ export interface SegmentDraft {
                       #singleFileInput
                       type="file"
                       class="hidden"
-                      accept=".pdf,.pptx,.ppt,.txt,.md,.markdown,.docx,.doc,.json,.csv"
+                      [attr.accept]="groundingFileAccept"
                       (change)="onSingleFileSelected($event)"
                     />
 
@@ -412,7 +493,7 @@ export interface SegmentDraft {
                           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        <span class="font-medium">Reading & extracting slide deck contents...</span>
+                        <span class="font-medium">Running Gemini OCR on your document...</span>
                       </div>
                     } @else if (singleUploadedFileName()) {
                       <div class="flex items-center justify-between w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg shadow-2xs" (click)="$event.stopPropagation()">
@@ -442,11 +523,11 @@ export interface SegmentDraft {
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                         </svg>
                         <span class="text-xs font-medium text-slate-700">
-                          Upload presentation deck (.pdf, .pptx, .txt, .md, .docx) or drag here
+                          Upload presentation deck or scan (.pdf, .pptx, .docx, images, .txt) — Gemini OCR extracts text
                         </span>
                       </div>
                       <p class="text-[11px] text-slate-400">
-                        File will be vectorized using Gemini Embedding 2 (<code class="font-mono text-indigo-600">text-embedding-004</code>) for live RAG grounding
+                        Gemini OCRs the file, then embeddings (<code class="font-mono text-indigo-600">text-embedding-004</code>) ground live answers
                       </p>
                     }
                   </div>
@@ -623,6 +704,34 @@ export interface SegmentDraft {
             <!-- Series Form -->
             @if (modalMode() === 'series') {
               <form [formGroup]="seriesForm" (ngSubmit)="submitCreateSeries()" class="space-y-4">
+                <div class="p-3.5 rounded-xl border border-amber-200 bg-amber-50/80 space-y-2">
+                  <label for="series-gemini-key-input" class="block text-xs font-bold text-amber-950 uppercase tracking-wider">
+                    Gemini API Key (optional)
+                  </label>
+                  <p class="text-[11px] text-amber-900/80 leading-relaxed">
+                    Paste your own Gemini API key for this workshop’s AI answers and reports.
+                    Leave blank to use the platform Gemini key.
+                  </p>
+                  <div class="relative">
+                    <input
+                      id="series-gemini-key-input"
+                      [type]="showSeriesGeminiKey() ? 'text' : 'password'"
+                      formControlName="geminiApiKey"
+                      placeholder="AIzaSy… (optional)"
+                      autocomplete="off"
+                      class="w-full pl-3.5 pr-10 py-2.5 bg-white border border-amber-200 focus:border-indigo-600 rounded-xl text-xs text-slate-900 outline-none font-mono"
+                    />
+                    <button
+                      type="button"
+                      (click)="showSeriesGeminiKey.set(!showSeriesGeminiKey())"
+                      class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title="Show or hide API key"
+                    >
+                      <mat-icon class="text-base">{{ showSeriesGeminiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
+                    </button>
+                  </div>
+                </div>
+
                 <div>
                   <label for="series-title-input" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                     Workshop Series Title *
@@ -822,6 +931,13 @@ export interface SegmentDraft {
                             class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-600"
                           />
                         </div>
+                        <input
+                          type="email"
+                          [value]="seg.speakerEmail || ''"
+                          (input)="updateSegment(seg.id, 'speakerEmail', $any($event.target).value)"
+                          placeholder="Invite Speaker Gmail (optional)"
+                          class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-indigo-600"
+                        />
                       </div>
                     }
                   </div>
@@ -863,6 +979,17 @@ export class HostStudio {
   public modalMode = signal<'series' | 'single'>('series');
   public isSubmitting = signal<boolean>(false);
 
+  constructor() {
+    // When landing as speaker, load Gmail-matched invites into Speaker Studio.
+    if (this.qaService.userRole() === 'speaker') {
+      const email =
+        this.qaService.userEmail() || this.firebaseService.currentUser()?.email || '';
+      if (email) {
+        void this.qaService.fetchSpeakerInvites(email);
+      }
+    }
+  }
+
   public segments = signal<SegmentDraft[]>([
     {
       id: 'seg-1',
@@ -891,15 +1018,19 @@ export class HostStudio {
   public seriesForm = this.fb.group({
     title: ['', Validators.required],
     description: [''],
+    geminiApiKey: [''],
     codeMode: ['auto'],
     customJoinCode: [''],
   });
+
+  public showSeriesGeminiKey = signal<boolean>(false);
 
   public singleCodeMode = signal<'auto' | 'custom'>('auto');
   public seriesCodeMode = signal<'auto' | 'custom'>('auto');
 
   public isSingleDragging = signal<boolean>(false);
   public isSingleReadingFile = signal<boolean>(false);
+  public groundingFileAccept = GROUNDING_FILE_ACCEPT;
   public singleUploadedFileName = signal<string | null>(null);
   public singleUploadedFileSize = signal<string | null>(null);
 
@@ -1015,10 +1146,25 @@ export class HostStudio {
     return 'Staff Member';
   }
 
+  public async refreshSpeakerInvites(): Promise<void> {
+    const email = this.qaService.userEmail() || this.firebaseService.currentUser()?.email || '';
+    const invites = await this.qaService.fetchSpeakerInvites(email);
+    if (invites.length === 0) {
+      this.qaService.showToast('No invited talks found for this Gmail yet.');
+    } else {
+      this.qaService.showToast(`Loaded ${invites.length} invited talk${invites.length === 1 ? '' : 's'}.`);
+    }
+  }
+
+  public async openSpeakerInvite(invite: SpeakerInviteRecord): Promise<void> {
+    await this.qaService.joinAsInvitedSpeaker(invite);
+  }
+
   public signOut(): void {
     this.firebaseService.logOut();
     this.qaService.userRole.set('attendee');
     this.qaService.userAuthToken.set(null);
+    this.qaService.speakerInvites.set([]);
     this.qaService.showToast('Signed out of Host Studio');
     this.qaService.navigateToJoin();
   }
@@ -1073,62 +1219,23 @@ export class HostStudio {
     this.singleUploadedFileName.set(file.name);
     this.singleUploadedFileSize.set(this.formatFileSize(file.size));
 
-    const extension = file.name.split('.').pop()?.toLowerCase() || '';
-
     try {
-      if (['txt', 'md', 'markdown', 'json', 'csv'].includes(extension)) {
-        const text = await file.text();
-        this.singleForm.patchValue({ groundingContext: text.trim() });
-        this.qaService.showToast(`Imported ${file.name} for Gemini Embedding 2 RAG`);
-      } else {
-        // PDF, PPTX, DOCX or other binary document formats: extract printable text runs
-        const buffer = await file.arrayBuffer();
-        const extracted = this.extractPrintableText(buffer);
-        if (extracted.length > 30) {
-          this.singleForm.patchValue({ groundingContext: extracted });
-          this.qaService.showToast(`Extracted text from ${file.name} for Gemini Embedding 2`);
-        } else {
-          // If binary extraction yields too little plain text, provide a structured representation
-          const contextSummary = `Slide Deck: ${file.name}\nSize: ${this.formatFileSize(file.size)}\nKey Topics: Presentation slides, architecture overview, and session notes.`;
-          this.singleForm.patchValue({ groundingContext: contextSummary });
-          this.qaService.showToast(`Uploaded ${file.name}. Ready for Gemini Embedding 2 RAG.`);
-        }
-      }
+      const extracted = await extractGroundingTextFromFile(file);
+      this.singleForm.patchValue({ groundingContext: extracted.text });
+      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      this.qaService.showToast(
+        `Extracted ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+      );
     } catch (err) {
       console.error('Failed to parse uploaded slide deck file:', err);
-      this.qaService.showToast('Could not read slide deck file. Please paste notes directly.');
+      this.singleUploadedFileName.set(null);
+      this.singleUploadedFileSize.set(null);
+      this.qaService.showToast(
+        err instanceof Error ? err.message : 'Could not read document. Please paste notes directly.'
+      );
     } finally {
       this.isSingleReadingFile.set(false);
     }
-  }
-
-  private extractPrintableText(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    const runs: string[] = [];
-    let currentRun = '';
-
-    for (let i = 0; i < bytes.length; i++) {
-      const b = bytes[i];
-      // Printable ASCII or newline/tab
-      if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
-        currentRun += String.fromCharCode(b);
-      } else {
-        if (currentRun.length >= 4) {
-          runs.push(currentRun.trim());
-        }
-        currentRun = '';
-      }
-    }
-    if (currentRun.length >= 4) {
-      runs.push(currentRun.trim());
-    }
-
-    // Filter runs that look like meaningful words/sentences rather than binary noise
-    const cleanRuns = runs
-      .map(r => r.replace(/[^\x20-\x7E\n]/g, ' ').replace(/\s+/g, ' ').trim())
-      .filter(r => r.length >= 4 && /[a-zA-Z]{2,}/.test(r) && !/^[%/\\<>{}[\]]+$/.test(r));
-
-    return cleanRuns.slice(0, 500).join('\n\n');
   }
 
   public formatFileSize(bytes: number): string {
@@ -1147,6 +1254,7 @@ export class HostStudio {
         speakerName: '',
         speakerRole: '',
         speakerOrg: '',
+        speakerEmail: '',
         type: 'TALK',
         durationMinutes: 40,
         startTime: '',
@@ -1227,11 +1335,13 @@ export class HostStudio {
       title: v.title || 'Multi-Speaker Workshop Series',
       description: v.description || '',
       customJoinCode: seriesCodeToUse,
+      geminiApiKey: (v.geminiApiKey || '').trim() || undefined,
       segments: this.segments().map(s => ({
         id: s.id,
         title: s.title,
         speakerName: s.speakerName,
         speakerRole: s.speakerRole,
+        speakerEmail: (s.speakerEmail || '').trim().toLowerCase() || undefined,
         topicSummary: s.topicSummary,
         durationMinutes: s.durationMinutes,
         type: s.type,

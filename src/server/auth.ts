@@ -106,15 +106,17 @@ export function resolveAuth(
  * Public response sanitizer: Strips organizerToken and all segment adminTokens
  * (Spec requirement: GET /api/series/:code MUST NOT return organizerToken or any adminToken)
  */
-export function sanitizeSeriesForPublic(series: Series): Omit<Series, 'organizerToken'> {
+export function sanitizeSeriesForPublic(
+  series: Series
+): Omit<Series, 'organizerToken' | 'geminiApiKey'> {
   const sanitizedSegments = (series.segments || []).map(seg => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { adminToken, ...safeSeg } = seg;
+    const { adminToken, speakerEmail, ...safeSeg } = seg;
     return safeSeg as typeof seg;
   });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { organizerToken, ...safeSeries } = series;
+  const { organizerToken, geminiApiKey, ...safeSeries } = series;
 
   return {
     ...safeSeries,
