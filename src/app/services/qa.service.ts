@@ -154,7 +154,7 @@ export class QaService {
       const code = session?.joinCode || series?.joinCode;
       if (!code) return;
 
-      // A navigation already in flight (e.g. the sessionResolver awaiting
+      // A navigation already in flight (e.g. sessionGuard awaiting
       // joinSession() on a fresh deep link) owns getting the URL to its final
       // state. router.url doesn't update until that navigation resolves
       // (default deferred urlUpdateStrategy), so acting here would race it and
@@ -338,9 +338,9 @@ export class QaService {
   // Detect ?token=... or ?code=... in URL and trigger zero-friction auto-join
   private checkUrlForTokens(): void {
     if (typeof window !== 'undefined' && window.location) {
-      // /session/:code and /series/:code are handled by sessionResolver — skip
+      // /session/:code and /series/:code are handled by sessionGuard — skip
       // the legacy auto-join here to avoid a duplicate joinSession() call
-      // racing the resolver's.
+      // racing the guard's.
       if (/^\/(session|series)\/[A-Za-z0-9_-]+/i.test(window.location.pathname)) {
         const params = new URLSearchParams(window.location.search);
         const urlToken = params.get('token');
