@@ -4,7 +4,7 @@ import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
 
 function redirectToFeed(router: Router, state: RouterStateSnapshot): UrlTree {
-  const segments = state.url.split('?')[0].split('/').filter(Boolean);
+  const segments = state.url.split('?')[0].split('#')[0].split('/').filter(Boolean);
   const prefix = segments.slice(0, 2).join('/'); // e.g. 'session/ABC123'
   return router.parseUrl(`/${prefix}/feed`);
 }
@@ -53,8 +53,13 @@ export const adminTabGuard: CanActivateFn = (_route, state) => {
   return qaService.isAdmin() ? true : redirectToFeed(router, state);
 };
 
-export const organizerGuard: CanActivateFn = () => {
+// Firebase restores persisted auth asynchronously (onAuthStateChanged inside an
+// async initFirebase()), so currentUser is still null for the first moments of a
+// cold client boot. Awaiting authReady means a refresh on /host no longer races
+// the rehydration and bounces a genuinely signed-in organizer to /auth.
+export const organizerGuard: CanActivateFn = async () => {
   const firebaseService = inject(FirebaseService);
   const router = inject(Router);
+  await firebaseService.authReady;
   return firebaseService.isOrganizerLoggedIn() ? true : router.parseUrl('/auth');
 };

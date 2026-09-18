@@ -259,7 +259,7 @@ import { Segment } from '../models/qa.models';
                   @if (qaService.isSpeaker() && qaService.speakerSegmentId() === seg.id) {
                     <button
                       type="button"
-                      (click)="qaService.activeTab.set('teleprompter')"
+                      (click)="qaService.navigateToTab('teleprompter')"
                       class="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm cursor-pointer"
                     >
                       <mat-icon class="text-sm mr-1">monitor</mat-icon> Open My Teleprompter

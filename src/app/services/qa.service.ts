@@ -1,4 +1,4 @@
-import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { Injectable, Signal, computed, effect, inject, signal } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs';
 import {
@@ -26,6 +26,12 @@ export type ActiveTab =
 const ROUTABLE_TABS: ActiveTab[] = [
   'feed', 'series-control', 'teleprompter', 'analytics', 'moderation', 'grounding', 'report',
 ];
+
+// ActiveTab -> URL path segment. Everything is 1:1 except the Run of Show tab,
+// whose route segment reads better as 'run-of-show'.
+const TAB_URL_SEGMENTS: Partial<Record<ActiveTab, string>> = {
+  'series-control': 'run-of-show',
+};
 
 @Injectable({
   providedIn: 'root',
@@ -83,8 +89,15 @@ export class QaService {
   // Top-level View navigation when outside an active session ('join' | 'auth' | 'host-studio')
   public currentView = signal<'join' | 'auth' | 'host-studio'>('join');
 
-  // Navigation & filtering signals
-  public activeTab = signal<ActiveTab>('feed');
+  // Navigation & filtering signals.
+  //
+  // activeTab is DERIVED FROM THE URL and is therefore read-only to the outside
+  // world: <router-outlet /> renders whatever the router matched, so writing to
+  // this signal directly would only desynchronise the header highlight from the
+  // view actually on screen. Use navigateToTab() to switch tabs; the router
+  // event subscription in applyRouteToViewState() writes the backing signal.
+  private _activeTab = signal<ActiveTab>('feed');
+  public activeTab: Signal<ActiveTab> = this._activeTab.asReadonly();
   public filterCategory = signal<string>('ALL');
   public filterStatus = signal<string>('ALL');
   public selectedSegmentFilter = signal<string>('ALL'); // 'ALL' or specific segmentId
@@ -132,9 +145,10 @@ export class QaService {
         const code = session?.joinCode || series?.joinCode;
         if (code) {
           const isSeries = series?.joinCode === code;
-          this.router.navigate([isSeries ? '/series' : '/session', code, 'feed']);
+          this.router.navigate([isSeries ? '/series' : '/session', code, 'feed'], { replaceUrl: true });
         } else {
-          this.activeTab.set('feed');
+          // No session/series to navigate within — reset the derived state directly.
+          this._activeTab.set('feed');
         }
       }
     });
@@ -162,10 +176,16 @@ export class QaService {
       if (this.router.getCurrentNavigation()) return;
 
       const isSeries = series?.joinCode === code;
-      const currentUrl = this.router.url.split('?')[0];
+      const currentUrl = this.router.url.split('?')[0].split('#')[0];
       const expectedPrefix = `/${isSeries ? 'series' : 'session'}/${code}`;
       if (!currentUrl.startsWith(expectedPrefix)) {
-        this.router.navigate([isSeries ? '/series' : '/session', code, 'feed'], { replaceUrl: true });
+        // Preserve whichever tab the URL is already on. This effect also re-runs
+        // on every poll cycle (refreshSessionData() hands currentSession /
+        // currentSeries fresh object references), so hardcoding 'feed' here would
+        // yank a staff member off Analytics/Report whenever the prefix needs
+        // correcting (e.g. a case-mismatched :code in a hand-typed deep link).
+        const tab = currentUrl.match(/^\/(?:session|series)\/[^/]+\/([^/]+)/)?.[1] ?? 'feed';
+        this.router.navigate([isSeries ? '/series' : '/session', code, tab], { replaceUrl: true });
       }
     });
   }
@@ -192,7 +212,9 @@ export class QaService {
     if (tabMatch) {
       const segment = tabMatch[1] === 'run-of-show' ? 'series-control' : tabMatch[1];
       if ((ROUTABLE_TABS as string[]).includes(segment)) {
-        this.activeTab.set(segment as ActiveTab);
+        // Canonical URL -> view state write. This is the single source of truth
+        // for activeTab; everything else navigates and lets this run.
+        this._activeTab.set(segment as ActiveTab);
       }
     }
   }
@@ -338,24 +360,19 @@ export class QaService {
   // Detect ?token=... or ?code=... in URL and trigger zero-friction auto-join
   private checkUrlForTokens(): void {
     if (typeof window !== 'undefined' && window.location) {
-      // /session/:code and /series/:code are handled by sessionGuard — skip
-      // the legacy auto-join here to avoid a duplicate joinSession() call
-      // racing the guard's.
-      if (/^\/(session|series)\/[A-Za-z0-9_-]+/i.test(window.location.pathname)) {
-        const params = new URLSearchParams(window.location.search);
-        const urlToken = params.get('token');
-        if (urlToken) {
-          this.userAuthToken.set(urlToken);
-          localStorage.setItem('live_qa_auth_token', urlToken);
-        }
-        return;
-      }
-
+      // A staff ?token= is honoured on every URL shape, canonical or legacy.
       const params = new URLSearchParams(window.location.search);
       const urlToken = params.get('token');
       if (urlToken) {
         this.userAuthToken.set(urlToken);
         localStorage.setItem('live_qa_auth_token', urlToken);
+      }
+
+      // /session/:code and /series/:code are handled by sessionGuard — skip
+      // the legacy auto-join here to avoid a duplicate joinSession() call
+      // racing the guard's.
+      if (/^\/(session|series)\/[A-Za-z0-9_-]+/i.test(window.location.pathname)) {
+        return;
       }
 
       const detectedCode = this.extractUrlCode();
@@ -805,7 +822,7 @@ export class QaService {
 
     const success = await this.joinSession(code, attendeeName);
     if (success) {
-      this.activeTab.set('feed');
+      this.navigateToTab('feed');
       this.showToast(`Joined Live Room #${code} as ${attendeeName}`);
     }
     this.isLoading.set(false);
@@ -926,15 +943,20 @@ export class QaService {
       const data = await res.json();
       this.currentSession.set(data.session);
 
-      // Also load Series metadata if available
+      // Also load Series metadata if available. A plain single-session join MUST
+      // clear any series left over from a previous visit, otherwise header
+      // navigation would keep building /series/<single-session-code>/... URLs.
       try {
         const seriesRes = await fetch(`/api/series/${code}`);
         if (seriesRes.ok) {
           const sData = await seriesRes.json();
           this.currentSeries.set(sData.series);
+        } else {
+          this.currentSeries.set(null);
         }
       } catch {
         // Single session fallback
+        this.currentSeries.set(null);
       }
 
       // Verify any saved token
@@ -1152,6 +1174,28 @@ export class QaService {
     this.router.navigate(['/host']);
   }
 
+  /**
+   * Switch tabs inside the active session/series by performing a real router
+   * navigation. activeTab is derived from the URL, so this — not a signal
+   * write — is what actually changes the view behind <router-outlet />.
+   * No-ops when there is no active session/series to navigate within.
+   */
+  public navigateToTab(tab: ActiveTab): void {
+    if (!ROUTABLE_TABS.includes(tab)) return;
+
+    // Base and code are resolved together from one source of truth (same rule as
+    // header.ts's nav()) so they can never disagree and build a /series/<single-
+    // session-code>/... URL that doesn't exist.
+    const series = this.currentSeries();
+    const session = this.currentSession();
+    const base = series ? '/series' : '/session';
+    const code = series?.joinCode ?? session?.joinCode;
+    if (!code) return;
+
+    const segment = TAB_URL_SEGMENTS[tab] || tab;
+    this.router.navigate([base, code, segment]);
+  }
+
   public leaveSession(): void {
     this.firebaseService.clearListeners();
     this.stopPolling();
@@ -1166,7 +1210,9 @@ export class QaService {
     this.filterStatus.set('ALL');
     this.selectedSegmentFilter.set('ALL');
     this.searchQuery.set('');
-    this.activeTab.set('feed');
+    // Full teardown: there is no session left to navigate within, so reset the
+    // derived tab state directly before heading back to the landing page.
+    this._activeTab.set('feed');
     this.currentView.set('join');
     this.router.navigate(['/']);
   }

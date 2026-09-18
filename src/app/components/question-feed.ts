@@ -603,7 +603,7 @@ import { SeriesLobby } from './series-lobby';
                 <button
                   id="btn-open-teleprompter-empty"
                   type="button"
-                  (click)="qaService.activeTab.set('teleprompter')"
+                  (click)="qaService.navigateToTab('teleprompter')"
                   class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-[#E8F0FE] text-[#1A73E8] hover:bg-[#D2E3FC] transition-colors cursor-pointer"
                 >
                   <mat-icon class="text-sm">tv</mat-icon>

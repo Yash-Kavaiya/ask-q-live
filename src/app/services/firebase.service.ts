@@ -45,18 +45,43 @@ export class FirebaseService {
 
   private activeUnsubscribes: Unsubscribe[] = [];
 
+  // Resolves once Firebase has had a chance to rehydrate persisted auth (i.e.
+  // on the FIRST onAuthStateChanged emission), or after AUTH_READY_TIMEOUT_MS
+  // if Firebase is unreachable/misconfigured so navigation never hangs.
+  // Route guards await this before reading isOrganizerLoggedIn(), otherwise a
+  // cold boot on /host would bounce a genuinely signed-in organizer to /auth.
+  private static readonly AUTH_READY_TIMEOUT_MS = 5000;
+  private resolveAuthReady: (() => void) | null = null;
+  public readonly authReady: Promise<void> = new Promise<void>((resolve) => {
+    this.resolveAuthReady = resolve;
+  });
+
   constructor() {
     this.initFirebase();
+  }
+
+  private markAuthReady(): void {
+    const resolve = this.resolveAuthReady;
+    if (resolve) {
+      this.resolveAuthReady = null;
+      resolve();
+    }
   }
 
   private async initFirebase(): Promise<void> {
     try {
       if (typeof window === 'undefined') {
+        // SSR: there is no persisted auth to wait for.
+        this.markAuthReady();
         return;
       }
 
+      // Safety net: resolve anyway if Firebase never calls back.
+      setTimeout(() => this.markAuthReady(), FirebaseService.AUTH_READY_TIMEOUT_MS);
+
       if (!firebaseConfigData || !firebaseConfigData.projectId) {
         this.connectionStatus.set('offline');
+        this.markAuthReady();
         return;
       }
 
@@ -89,6 +114,8 @@ export class FirebaseService {
           this.isConnected.set(true);
           this.connectionStatus.set('connected');
         }
+        // First emission means persisted auth (if any) has been restored.
+        this.markAuthReady();
       });
 
       // Sign in anonymously if not authenticated
@@ -107,6 +134,7 @@ export class FirebaseService {
       this.isConnected.set(false);
       this.connectionStatus.set('offline');
       this.lastError.set(err instanceof Error ? err.message : 'Firebase initialization failed');
+      this.markAuthReady();
     }
   }
 

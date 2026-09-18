@@ -1520,7 +1520,7 @@ export class SessionJoin implements OnInit {
 
     if (series) {
       this.showCreateModal.set(false);
-      this.qaService.activeTab.set('series-control');
+      this.qaService.navigateToTab('series-control');
     }
   }
 
@@ -1541,7 +1541,7 @@ export class SessionJoin implements OnInit {
 
     if (session) {
       this.showCreateModal.set(false);
-      this.qaService.activeTab.set('feed');
+      this.qaService.navigateToTab('feed');
     }
   }
 }

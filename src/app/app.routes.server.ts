@@ -10,6 +10,13 @@ export const serverRoutes: ServerRoute[] = [
     renderMode: RenderMode.Client,
   },
   {
+    // organizerGuard depends on live Firebase auth state, which does not exist
+    // at build time. Prerendering /host would bake the guard's unauthenticated
+    // redirect to /auth into the shipped HTML as a permanent meta refresh.
+    path: 'host',
+    renderMode: RenderMode.Client,
+  },
+  {
     path: '**',
     renderMode: RenderMode.Prerender,
   },

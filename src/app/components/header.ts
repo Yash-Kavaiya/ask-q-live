@@ -60,7 +60,7 @@ import { FirebaseService } from '../services/firebase.service';
               <nav class="hidden lg:flex items-center gap-1 bg-[#F1F3F4] p-1 rounded-xl text-sm font-medium border border-[#E0E2EC] overflow-x-auto scrollbar-none max-w-full">
                 <a
                   id="nav-tab-feed"
-                  [routerLink]="[navBase(), navCode(), 'feed']"
+                  [routerLink]="[nav().base, nav().code, 'feed']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'feed'"
                   [class.text-indigo-600]="qaService.activeTab() === 'feed'"
@@ -79,7 +79,7 @@ import { FirebaseService } from '../services/firebase.service';
                 <!-- Series Run of Show / Control Room -->
                 <a
                   id="nav-tab-series-control"
-                  [routerLink]="[navBase(), navCode(), 'run-of-show']"
+                  [routerLink]="[nav().base, nav().code, 'run-of-show']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'series-control'"
                   [class.text-indigo-600]="qaService.activeTab() === 'series-control'"
@@ -97,7 +97,7 @@ import { FirebaseService } from '../services/firebase.service';
 
                 <a
                   id="nav-tab-teleprompter"
-                  [routerLink]="[navBase(), navCode(), 'teleprompter']"
+                  [routerLink]="[nav().base, nav().code, 'teleprompter']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'teleprompter'"
                   [class.text-indigo-600]="qaService.activeTab() === 'teleprompter'"
@@ -110,7 +110,7 @@ import { FirebaseService } from '../services/firebase.service';
 
                 <a
                   id="nav-tab-analytics"
-                  [routerLink]="[navBase(), navCode(), 'analytics']"
+                  [routerLink]="[nav().base, nav().code, 'analytics']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'analytics'"
                   [class.text-indigo-600]="qaService.activeTab() === 'analytics'"
@@ -124,7 +124,7 @@ import { FirebaseService } from '../services/firebase.service';
                 @if (qaService.isAdmin()) {
                   <a
                     id="nav-tab-moderation"
-                    [routerLink]="[navBase(), navCode(), 'moderation']"
+                    [routerLink]="[nav().base, nav().code, 'moderation']"
                     class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0"
                     [class.bg-white]="qaService.activeTab() === 'moderation'"
                     [class.text-indigo-600]="qaService.activeTab() === 'moderation'"
@@ -140,7 +140,7 @@ import { FirebaseService } from '../services/firebase.service';
 
                   <a
                     id="nav-tab-grounding"
-                    [routerLink]="[navBase(), navCode(), 'grounding']"
+                    [routerLink]="[nav().base, nav().code, 'grounding']"
                     class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                     [class.bg-white]="qaService.activeTab() === 'grounding'"
                     [class.text-indigo-600]="qaService.activeTab() === 'grounding'"
@@ -154,7 +154,7 @@ import { FirebaseService } from '../services/firebase.service';
 
                 <a
                   id="nav-tab-report"
-                  [routerLink]="[navBase(), navCode(), 'report']"
+                  [routerLink]="[nav().base, nav().code, 'report']"
                   class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   [class.bg-white]="qaService.activeTab() === 'report'"
                   [class.text-indigo-600]="qaService.activeTab() === 'report'"
@@ -289,7 +289,7 @@ import { FirebaseService } from '../services/firebase.service';
           <div class="flex lg:hidden overflow-x-auto py-2 gap-1.5 border-t border-[#E0E2EC] scrollbar-none text-xs">
             <a
               id="mob-tab-feed"
-              [routerLink]="[navBase(), navCode(), 'feed']"
+              [routerLink]="[nav().base, nav().code, 'feed']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'feed'"
               [class.text-white]="qaService.activeTab() === 'feed'"
@@ -302,7 +302,7 @@ import { FirebaseService } from '../services/firebase.service';
 
             <a
               id="mob-tab-series-control"
-              [routerLink]="[navBase(), navCode(), 'run-of-show']"
+              [routerLink]="[nav().base, nav().code, 'run-of-show']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'series-control'"
               [class.text-white]="qaService.activeTab() === 'series-control'"
@@ -315,7 +315,7 @@ import { FirebaseService } from '../services/firebase.service';
 
             <a
               id="mob-tab-teleprompter"
-              [routerLink]="[navBase(), navCode(), 'teleprompter']"
+              [routerLink]="[nav().base, nav().code, 'teleprompter']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'teleprompter'"
               [class.text-white]="qaService.activeTab() === 'teleprompter'"
@@ -328,7 +328,7 @@ import { FirebaseService } from '../services/firebase.service';
 
             <a
               id="mob-tab-analytics"
-              [routerLink]="[navBase(), navCode(), 'analytics']"
+              [routerLink]="[nav().base, nav().code, 'analytics']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'analytics'"
               [class.text-white]="qaService.activeTab() === 'analytics'"
@@ -342,7 +342,7 @@ import { FirebaseService } from '../services/firebase.service';
             @if (qaService.isAdmin()) {
               <a
                 id="mob-tab-moderation"
-                [routerLink]="[navBase(), navCode(), 'moderation']"
+                [routerLink]="[nav().base, nav().code, 'moderation']"
                 class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
                 [class.bg-indigo-600]="qaService.activeTab() === 'moderation'"
                 [class.text-white]="qaService.activeTab() === 'moderation'"
@@ -356,7 +356,7 @@ import { FirebaseService } from '../services/firebase.service';
 
             <a
               id="mob-tab-report"
-              [routerLink]="[navBase(), navCode(), 'report']"
+              [routerLink]="[nav().base, nav().code, 'report']"
               class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
               [class.bg-indigo-600]="qaService.activeTab() === 'report'"
               [class.text-white]="qaService.activeTab() === 'report'"
@@ -377,10 +377,16 @@ export class Header {
   public voiceService = inject(VoiceService);
   public firebaseService = inject(FirebaseService);
   public isCodeCopied = signal<boolean>(false);
-  public navBase = computed(() => (this.qaService.currentSeries() ? '/series' : '/session'));
-  public navCode = computed(() =>
-    this.qaService.currentSession()?.joinCode || this.qaService.currentSeries()?.joinCode || ''
-  );
+  // Base and code are derived together from one source of truth so they can
+  // never disagree (a stale currentSeries alongside a single-session
+  // currentSession used to produce /series/<single-session-code>/... links).
+  public nav = computed<{ base: string; code: string }>(() => {
+    const series = this.qaService.currentSeries();
+    const session = this.qaService.currentSession();
+    if (series) return { base: '/series', code: series.joinCode };
+    if (session) return { base: '/session', code: session.joinCode };
+    return { base: '/session', code: '' };
+  });
 
   public copyJoinCode(code: string): void {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {

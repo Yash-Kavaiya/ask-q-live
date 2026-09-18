@@ -707,6 +707,31 @@ async function runSuite() {
         throw new Error(`Legacy ?code= link did not upgrade to canonical URL, got: ${legacyUrl}`);
       }
       recordPass('Legacy ?code= link still auto-joins and upgrades to the canonical /session/:code URL', legacyUrl);
+
+      // /host must be client-rendered, NOT a build-time prerender of the
+      // organizerGuard's unauthenticated redirect. A prerendered /host ships a
+      // static <meta http-equiv="refresh" content="0; url=/auth"> that pins every
+      // visitor — signed in or not — to the auth page forever.
+      const hostShellRes = await fetch(`${BASE_URL}/host`);
+      const hostShellHtml = await hostShellRes.text();
+      if (/http-equiv=["']?refresh/i.test(hostShellHtml)) {
+        throw new Error('/host is served as a static meta-refresh redirect page (baked-in prerender of the auth guard)');
+      }
+      recordPass('/host is served as a real Angular app shell, not a baked-in meta-refresh redirect');
+
+      await hostPage.goto(`${BASE_URL}/host`, { waitUntil: 'domcontentloaded' });
+      const hostDocTitle = await hostPage.title();
+      if (/redirect/i.test(hostDocTitle)) {
+        throw new Error(`/host served a "Redirecting" placeholder document (title: ${hostDocTitle})`);
+      }
+      // The Angular app must actually boot on /host (app-header is in the root
+      // shell) and then let the client-side guard decide where the user lands.
+      await hostPage.waitForSelector('app-header', { timeout: 15000 });
+      const hostLandedUrl = hostPage.url();
+      if (!/\/(host|auth)(\?|#|$)/.test(hostLandedUrl)) {
+        throw new Error(`Navigating to /host landed somewhere unexpected: ${hostLandedUrl}`);
+      }
+      recordPass('Direct navigation to /host boots the Angular app and resolves via the client auth guard', hostLandedUrl);
     } catch (err) {
       recordFail('Feature 13B: URL-Synced Navigation', err);
     }
@@ -767,6 +792,32 @@ async function runSuite() {
       recordPass('Saved screenshot: 13_workshop_series_run_of_show.png');
     } catch (err) {
       recordFail('Feature 14: Workshop Series & Run of Show', err);
+    }
+
+    // ------------------------------------------------------------------------
+    // FEATURE 14B: Series Deep Link (/series/:code/*)
+    // Placed after Feature 14 so it can reuse the workshop series provisioned
+    // there instead of duplicating series creation next to Feature 13B.
+    // ------------------------------------------------------------------------
+    console.log(`\n${c.bold}[Feature 14B] Series Deep Link${c.reset}`);
+    try {
+      await hostPage.goto(`${BASE_URL}/series/${SERIES_CODE}/run-of-show`, { waitUntil: 'domcontentloaded' });
+      await hostPage.waitForSelector('app-series-control-room', { timeout: 15000 });
+      const seriesDeepUrl = hostPage.url();
+      if (!seriesDeepUrl.includes(`/series/${SERIES_CODE}/run-of-show`)) {
+        throw new Error(`Series deep link did not stay on the Run of Show route, got: ${seriesDeepUrl}`);
+      }
+      recordPass('Direct deep link to /series/:code/run-of-show loads the series and renders Run of Show', seriesDeepUrl);
+
+      // Header tab links inside a series must resolve against /series/:code,
+      // never a mismatched /session/:code base.
+      const feedHref = await hostPage.locator('#nav-tab-feed').getAttribute('href');
+      if (feedHref !== `/series/${SERIES_CODE}/feed`) {
+        throw new Error(`Header feed tab href disagrees with the series base: ${feedHref}`);
+      }
+      recordPass('Header navigation links stay on the /series/:code base while in a series', feedHref);
+    } catch (err) {
+      recordFail('Feature 14B: Series Deep Link', err);
     }
 
     // ------------------------------------------------------------------------

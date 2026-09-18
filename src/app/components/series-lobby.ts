@@ -54,7 +54,7 @@ import { Segment, Question } from '../models/qa.models';
                 <button
                   id="btn-switch-feed"
                   type="button"
-                  (click)="qaService.activeTab.set('feed')"
+                  (click)="qaService.navigateToTab('feed')"
                   class="px-3.5 py-2 text-xs font-semibold text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
                   title="Switch to live Q&A stream"
                 >
@@ -66,7 +66,7 @@ import { Segment, Question } from '../models/qa.models';
                   <button
                     id="btn-switch-control"
                     type="button"
-                    (click)="qaService.activeTab.set('series-control')"
+                    (click)="qaService.navigateToTab('series-control')"
                     class="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-400/40 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <mat-icon class="text-sm">tune</mat-icon>
@@ -1173,7 +1173,7 @@ import { Segment, Question } from '../models/qa.models';
 
             <button
               type="button"
-              (click)="qaService.activeTab.set('feed')"
+              (click)="qaService.navigateToTab('feed')"
               class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <span>Open Live Feed</span>
@@ -1647,7 +1647,7 @@ export class SeriesLobby implements OnInit, OnDestroy {
 
   public filterFeedToSegment(segmentId: string): void {
     this.qaService.selectedSegmentFilter.set(segmentId);
-    this.qaService.activeTab.set('feed');
+    this.qaService.navigateToTab('feed');
   }
 
   public getSegmentQuestionCount(segmentId: string): number {

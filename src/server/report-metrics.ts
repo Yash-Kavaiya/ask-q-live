@@ -38,7 +38,10 @@ export function computeSessionMetrics(questions: Question[]): SessionMetrics {
     .map(q => ({
       id: q.id,
       content: q.content,
-      authorName: q.authorName || (q.isAnonymous ? 'Anonymous' : 'Attendee'),
+      // The anonymity flag wins over a name: seeded/demo questions can carry both
+      // isAnonymous: true and a real authorName, and the report must respect the
+      // attendee's choice to stay anonymous.
+      authorName: q.isAnonymous ? 'Anonymous' : (q.authorName || 'Attendee'),
       upvotes: q.upvotes,
     }));
 

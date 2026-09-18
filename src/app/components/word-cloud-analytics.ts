@@ -960,7 +960,7 @@ export type WordCloudViewMode = 'cloud' | 'bubbles' | 'matrix';
             <button
               id="btn-goto-teleprompter-from-analytics"
               type="button"
-              (click)="qaService.activeTab.set('teleprompter')"
+              (click)="qaService.navigateToTab('teleprompter')"
               class="w-full mt-2 py-2.5 px-3 rounded-xl text-xs font-semibold bg-[#E8F0FE] text-[#1A73E8] hover:bg-[#D2E3FC] transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs"
             >
               <mat-icon class="text-sm">live_tv</mat-icon>
@@ -1522,6 +1522,6 @@ export class WordCloudAnalytics implements AfterViewInit, OnDestroy {
 
   public filterByWord(word: string): void {
     this.qaService.searchQuery.set(word);
-    this.qaService.activeTab.set('feed');
+    this.qaService.navigateToTab('feed');
   }
 }
