@@ -23,7 +23,11 @@ const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
 const angularApp = new AngularNodeAppEngine({
-  allowedHosts: ['localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0'],
+  allowedHosts: [
+    'localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0',
+    'ask-q-live-443180956629.us-central1.run.app',
+    'ask-q-live-wc5dzwjbtq-uc.a.run.app',
+  ],
 });
 
 // Helper to safely extract string params without index signature or array issues
