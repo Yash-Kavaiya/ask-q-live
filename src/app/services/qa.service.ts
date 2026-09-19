@@ -19,6 +19,7 @@ import {
   ActiveLiveRoomPreview,
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
+import { filterAndSortQuestions, selectPendingModerationQuestions, selectTopPrioritizedQuestions } from '../utils/question-filters';
 
 export type ActiveTab =
   | 'feed' | 'lobby' | 'series-control' | 'manage' | 'teleprompter' | 'analytics'
@@ -422,97 +423,24 @@ export class QaService {
 
   // Computed filtered questions
   public filteredQuestions = computed(() => {
-    const list = this.questions();
-    const cat = this.filterCategory();
-    const status = this.filterStatus();
-    const segFilter = this.selectedSegmentFilter();
-    const search = this.searchQuery().toLowerCase().trim();
-    const sort = this.sortBy();
-    const userFp = this.userFingerprint();
-    const upvoted = this.userUpvotedIds();
-
-    let result = list.filter(q => {
-      // Do not show rejected or spam unless viewing in moderation tab
-      if (this.activeTab() !== 'moderation') {
-        if (q.status === 'REJECTED' || (q.status === 'PENDING_REVIEW' && q.clientFingerprint !== userFp)) {
-          return false;
-        }
-      }
-
-      // Segment filtering
-      if (this.isSpeaker() && this.speakerSegmentId()) {
-        if (q.segmentId !== this.speakerSegmentId()) return false;
-      } else if (segFilter !== 'ALL') {
-        if (q.segmentId !== segFilter) return false;
-      }
-
-      if (cat !== 'ALL' && q.category !== cat) return false;
-
-      if (status === 'MY_QUESTIONS') {
-        if (q.clientFingerprint !== userFp) return false;
-      } else if (status === 'UPVOTED') {
-        if (!upvoted.has(q.id)) return false;
-      } else if (status === 'AI_ANSWERED') {
-        if (!q.aiLine1 || q.aiStatus !== 'READY') return false;
-      } else if (status !== 'ALL' && q.status !== status) {
-        return false;
-      }
-
-      if (search) {
-        const matchesContent = q.content.toLowerCase().includes(search);
-        const matchesAuthor = q.authorName.toLowerCase().includes(search);
-        const matchesSpeaker = q.speakerName && q.speakerName.toLowerCase().includes(search);
-        const matchesAi = (q.aiLine1 && q.aiLine1.toLowerCase().includes(search)) ||
-          (q.aiLine2 && q.aiLine2.toLowerCase().includes(search));
-        if (!matchesContent && !matchesAuthor && !matchesSpeaker && !matchesAi) return false;
-      }
-
-      return true;
+    return filterAndSortQuestions(this.questions(), {
+      category: this.filterCategory(),
+      status: this.filterStatus(),
+      segmentFilter: this.selectedSegmentFilter(),
+      search: this.searchQuery(),
+      sort: this.sortBy(),
+      userFingerprint: this.userFingerprint(),
+      upvotedIds: this.userUpvotedIds(),
+      isModerationView: this.activeTab() === 'moderation',
+      isSpeaker: this.isSpeaker(),
+      speakerSegmentId: this.speakerSegmentId(),
     });
-
-    // Sorting: Popularity (highest thumbs-up votes), Recent, or Trending
-    if (sort === 'popular' || sort === 'top') {
-      result = [...result].sort((a, b) => {
-        // Keep live answering question in active spotlight
-        if (a.status === 'ANSWERING' && b.status !== 'ANSWERING') return -1;
-        if (b.status === 'ANSWERING' && a.status !== 'ANSWERING') return 1;
-        // Primary criterion: highest upvotes/thumbs-up first
-        if (b.upvotes !== a.upvotes) {
-          return b.upvotes - a.upvotes;
-        }
-        // Tie-breaker: newest question first
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
-    } else if (sort === 'recent') {
-      result = [...result].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-    } else {
-      // Trending: prioritizes upvotes + recency momentum
-      result = [...result].sort((a, b) => {
-        if (a.status === 'ANSWERING' && b.status !== 'ANSWERING') return -1;
-        if (b.status === 'ANSWERING' && a.status !== 'ANSWERING') return 1;
-        const now = Date.now();
-        const scoreA = (a.upvotes + 1) / Math.pow((now - new Date(a.createdAt).getTime()) / 60000 + 2, 1.2);
-        const scoreB = (b.upvotes + 1) / Math.pow((now - new Date(b.createdAt).getTime()) / 60000 + 2, 1.2);
-        return scoreB - scoreA;
-      });
-    }
-
-    return result;
   });
 
-  public pendingModerationQuestions = computed(() => {
-    return this.questions().filter(q => q.status === 'PENDING_REVIEW' || q.isSpam);
-  });
+  public pendingModerationQuestions = computed(() => selectPendingModerationQuestions(this.questions()));
 
   // Top prioritized popular questions
-  public topPrioritizedQuestions = computed(() => {
-    return this.questions()
-      .filter(q => (q.status === 'APPROVED' || q.status === 'ANSWERING') && q.upvotes > 0)
-      .sort((a, b) => b.upvotes - a.upvotes)
-      .slice(0, 3);
-  });
+  public topPrioritizedQuestions = computed(() => selectTopPrioritizedQuestions(this.questions()));
 
   // ==========================================
   // Role Authentication (FR-SEC-1, FR-SEC-2)
