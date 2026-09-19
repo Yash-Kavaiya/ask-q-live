@@ -53,3 +53,44 @@ describe('SessionApiClient', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('SessionApiClient: questions & analytics', () => {
+  let client: SessionApiClient;
+
+  beforeEach(() => {
+    client = new SessionApiClient();
+  });
+
+  it('submitQuestion posts to /questions and returns the parsed body on success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ deduplicated: false, question: { id: 'q1' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await client.submitQuestion('ABC123', { content: 'Why?' });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/ABC123/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'Why?' }),
+    });
+    expect(result.question?.id).toBe('q1');
+  });
+
+  it('toggleUpvote returns null (not a throw) when the server responds with a non-ok status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    const result = await client.toggleUpvote('ABC123', 'q1', 'fp1');
+    expect(result).toBeNull();
+  });
+
+  it('deleteQuestion returns true only when the response is ok', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    expect(await client.deleteQuestion('ABC123', 'q1', { clientFingerprint: 'fp1', isAdmin: false })).toBe(true);
+  });
+
+  it('translateText returns the original text on a network error instead of throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await client.translateText('ABC123', 'hello', 'fr')).toBe('hello');
+  });
+});

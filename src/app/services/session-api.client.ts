@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import {
-  ActiveLiveRoomPreview, Segment, Session, SessionSeries, SessionSettings, SpeakerInviteRecord, UserAccessInfo,
+  ActiveLiveRoomPreview, PostSessionReport, Question, Segment, SeriesReport, Session, SessionSeries,
+  SessionSettings, SpeakerInviteRecord, TelemetryMetrics, UserAccessInfo, WordFrequency,
 } from '../models/qa.models';
 
 @Injectable({ providedIn: 'root' })
@@ -207,5 +208,202 @@ export class SessionApiClient {
       body: JSON.stringify({ segmentIds, token }),
     });
     if (!res.ok) throw new Error('Failed to reorder segments');
+  }
+
+  async getQuestions(
+    code: string,
+    fingerprint: string,
+    segmentQuery: string,
+  ): Promise<{ questions?: Question[]; userUpvotedIds?: string[] } | null> {
+    const res = await fetch(`/api/sessions/${code}/questions?fingerprint=${fingerprint}${segmentQuery}`);
+    return res.ok ? res.json() : null;
+  }
+
+  async getTelemetry(
+    code: string,
+    fingerprint: string,
+    segmentQuery: string,
+  ): Promise<TelemetryMetrics | null> {
+    const res = await fetch(`/api/sessions/${code}/telemetry?fingerprint=${fingerprint}${segmentQuery}`);
+    return res.ok ? res.json() : null;
+  }
+
+  async getTeleprompterQueue(code: string, segmentQuery: string): Promise<Question[] | null> {
+    const res = await fetch(`/api/sessions/${code}/teleprompter?${segmentQuery}`);
+    return res.ok ? res.json() : null;
+  }
+
+  async getWordCloud(code: string, segmentQuery: string): Promise<WordFrequency[] | null> {
+    const res = await fetch(`/api/sessions/${code}/wordcloud?${segmentQuery}`);
+    return res.ok ? res.json() : null;
+  }
+
+  async moveQuestionToSegment(
+    code: string,
+    questionId: string,
+    targetSegmentId: string,
+    token: string | null,
+  ): Promise<void> {
+    const res = await fetch(`/api/series/${code}/questions/${questionId}/move-segment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ targetSegmentId, token }),
+    });
+    if (!res.ok) throw new Error('Failed to move question');
+  }
+
+  async requestRagAnswer(code: string, questionId: string): Promise<{ question?: Question } | null> {
+    const res = await fetch(`/api/series/${code}/questions/${questionId}/rag-answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async submitQuestion(
+    code: string,
+    payload: object,
+  ): Promise<{ deduplicated: boolean; message?: string; question?: Question }> {
+    const res = await fetch(`/api/sessions/${code}/questions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to submit question');
+    }
+    return data;
+  }
+
+  async toggleUpvote(
+    code: string,
+    questionId: string,
+    fingerprint: string,
+  ): Promise<{ upvotes?: number } | null> {
+    const res = await fetch(`/api/sessions/${code}/questions/${questionId}/upvote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientFingerprint: fingerprint,
+      }),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async updateQuestionStatus(code: string, questionId: string, payload: object): Promise<void> {
+    await fetch(`/api/sessions/${code}/questions/${questionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async editQuestionContent(code: string, questionId: string, payload: object): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  }
+
+  async deleteQuestion(code: string, questionId: string, payload: object): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  }
+
+  async submitHumanAnswer(
+    code: string,
+    questionId: string,
+    payload: object,
+  ): Promise<{ question?: Question } | null> {
+    const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async deleteHumanAnswer(
+    code: string,
+    questionId: string,
+    answerId: string,
+    payload: object,
+  ): Promise<{ question?: Question } | null> {
+    const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers/${answerId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async updateGroundingContext(code: string, contextData: string): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${code}/grounding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contextData }),
+    });
+    return res.ok;
+  }
+
+  async updateSettings(code: string, settings: object): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${code}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    });
+    return res.ok;
+  }
+
+  async translateText(code: string, text: string, targetLanguage: string): Promise<string> {
+    try {
+      const res = await fetch(`/api/sessions/${code}/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, targetLanguage }),
+      });
+      const data = await res.json();
+      return data.translatedText || text;
+    } catch {
+      return text;
+    }
+  }
+
+  async generatePostSessionReport(code: string): Promise<PostSessionReport> {
+    const res = await fetch(`/api/sessions/${code}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('Report generation failed');
+    return res.json();
+  }
+
+  async fetchSeriesReport(code: string): Promise<SeriesReport> {
+    const res = await fetch(`/api/series/${code}/report`);
+    if (!res.ok) throw new Error('Series report generation failed');
+    return res.json();
+  }
+
+  async banParticipant(code: string, fingerprint: string, banned: boolean): Promise<boolean> {
+    const res = await fetch(`/api/sessions/${code}/participants/${fingerprint}/ban`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ banned }),
+    });
+    return res.ok;
   }
 }

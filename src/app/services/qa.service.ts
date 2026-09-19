@@ -771,25 +771,18 @@ export class QaService {
         items.map(q => (q.id === questionId ? { ...q, aiStatus: 'GENERATING' } : q))
       );
 
-      const res = await fetch(`/api/series/${code}/questions/${questionId}/rag-answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.question) {
-          const updated: Question = data.question;
-          this.questions.update(items =>
-            items.map(q => (q.id === questionId ? { ...q, ...updated } : q))
-          );
-          if (updated.isGroundedOnDeck) {
-            this.showToast('Grounded RAG Answer synthesized from presentation deck!');
-          } else {
-            this.showToast('AI Answer synthesized (Generic • Not Grounded on Deck)');
-          }
-          return updated;
+      const data = await this.api.requestRagAnswer(code, questionId);
+      if (data?.question) {
+        const updated: Question = data.question;
+        this.questions.update(items =>
+          items.map(q => (q.id === questionId ? { ...q, ...updated } : q))
+        );
+        if (updated.isGroundedOnDeck) {
+          this.showToast('Grounded RAG Answer synthesized from presentation deck!');
+        } else {
+          this.showToast('AI Answer synthesized (Generic • Not Grounded on Deck)');
         }
+        return updated;
       }
     } catch (err) {
       console.error('Failed to generate RAG answer:', err);
@@ -1149,16 +1142,15 @@ export class QaService {
       const segId = this.selectedSegmentFilter();
       const segQuery = segId && segId !== 'ALL' ? `&segmentId=${segId}` : '';
 
-      const [questionsRes, telemetryRes, teleprompterRes, wordcloudRes, seriesRes] = await Promise.all([
-        fetch(`/api/sessions/${code}/questions?fingerprint=${fp}${segQuery}`),
-        fetch(`/api/sessions/${code}/telemetry?fingerprint=${fp}${segQuery}`),
-        fetch(`/api/sessions/${code}/teleprompter?${segQuery}`),
-        fetch(`/api/sessions/${code}/wordcloud?${segQuery}`),
-        fetch(`/api/series/${code}`),
+      const [qData, tData, tpData, wcData, sData] = await Promise.all([
+        this.api.getQuestions(code, fp, segQuery),
+        this.api.getTelemetry(code, fp, segQuery),
+        this.api.getTeleprompterQueue(code, segQuery),
+        this.api.getWordCloud(code, segQuery),
+        this.api.getSeries(code),
       ]);
 
-      if (questionsRes.ok) {
-        const qData = await questionsRes.json();
+      if (qData) {
         const serverQuestions: Question[] = qData.questions || [];
         if (serverQuestions.length > 0) {
           this.questions.set(serverQuestions);
@@ -1177,23 +1169,19 @@ export class QaService {
         }
       }
 
-      if (telemetryRes.ok) {
-        const tData = await telemetryRes.json();
+      if (tData) {
         this.telemetry.set(tData);
       }
 
-      if (teleprompterRes.ok) {
-        const tpData = await teleprompterRes.json();
+      if (tpData) {
         this.teleprompterQuestions.set(tpData);
       }
 
-      if (wordcloudRes.ok) {
-        const wcData = await wordcloudRes.json();
+      if (wcData) {
         this.wordCloudData.set(wcData);
       }
 
-      if (seriesRes.ok) {
-        const sData = await seriesRes.json();
+      if (sData) {
         let series = sData.series as SessionSeries | undefined;
         if (series) {
           series = await this.mergePrivilegedSegmentTokens(code, series);
@@ -1602,16 +1590,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/questions/${questionId}/move-segment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ targetSegmentId, token }),
-      });
-
-      if (!res.ok) throw new Error('Failed to move question');
+      await this.api.moveQuestionToSegment(code, questionId, targetSegmentId, token);
       this.showToast('Question routed to new segment queue');
       await this.refreshSessionData(true);
       return true;
@@ -1637,23 +1616,14 @@ export class QaService {
     if (!code) return { success: false, message: 'No active session' };
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientFingerprint: this.userFingerprint(),
-          authorName: authorName || this.userName() || 'Attendee',
-          isAnonymous,
-          content,
-          category,
-          segmentId: segmentId || this.activeSegment()?.id,
-        }),
+      const data = await this.api.submitQuestion(code, {
+        clientFingerprint: this.userFingerprint(),
+        authorName: authorName || this.userName() || 'Attendee',
+        isAnonymous,
+        content,
+        category,
+        segmentId: segmentId || this.activeSegment()?.id,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to submit question');
-      }
 
       if (data.deduplicated) {
         this.showToast(data.message || 'Similar inquiry merged! Upvoted primary question.');
@@ -1726,22 +1696,15 @@ export class QaService {
     }
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions/${questionId}/upvote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientFingerprint: this.userFingerprint(),
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (typeof data.upvotes === 'number') {
+      const data = await this.api.toggleUpvote(code, questionId, this.userFingerprint());
+      if (data) {
+        const upvotes = data.upvotes;
+        if (typeof upvotes === 'number') {
           this.questions.update(list =>
-            list.map(q => (q.id === questionId ? { ...q, upvotes: data.upvotes } : q))
+            list.map(q => (q.id === questionId ? { ...q, upvotes } : q))
           );
           this.firebaseService.updateQuestionInFirestore(code, questionId, {
-            upvotes: data.upvotes,
+            upvotes,
           });
         }
       } else {
@@ -1764,14 +1727,10 @@ export class QaService {
     this.firebaseService.updateQuestionInFirestore(code, questionId, { status });
 
     try {
-      await fetch(`/api/sessions/${code}/questions/${questionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status,
-          isAdmin: this.isAdmin() || this.isSpeaker(),
-          clientFingerprint: this.userFingerprint(),
-        }),
+      await this.api.updateQuestionStatus(code, questionId, {
+        status,
+        isAdmin: this.isAdmin() || this.isSpeaker(),
+        clientFingerprint: this.userFingerprint(),
       });
       await this.refreshSessionData(true);
     } catch (err) {
@@ -1787,16 +1746,12 @@ export class QaService {
     this.firebaseService.updateQuestionInFirestore(code, questionId, { content: newContent });
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: newContent,
-          clientFingerprint: this.userFingerprint(),
-          isAdmin: this.isAdmin(),
-        }),
+      const ok = await this.api.editQuestionContent(code, questionId, {
+        content: newContent,
+        clientFingerprint: this.userFingerprint(),
+        isAdmin: this.isAdmin(),
       });
-      if (res.ok) {
+      if (ok) {
         this.showToast('Question updated');
         await this.refreshSessionData(true);
         return true;
@@ -1817,15 +1772,11 @@ export class QaService {
     this.firebaseService.deleteQuestionFromFirestore(code, questionId);
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientFingerprint: this.userFingerprint(),
-          isAdmin: this.isAdmin(),
-        }),
+      const ok = await this.api.deleteQuestion(code, questionId, {
+        clientFingerprint: this.userFingerprint(),
+        isAdmin: this.isAdmin(),
       });
-      if (res.ok) {
+      if (ok) {
         this.showToast('Question deleted');
         return true;
       }
@@ -1848,32 +1799,27 @@ export class QaService {
     const authorName = this.userName() || (this.isSpeaker() ? 'Speaker' : this.isOrganizer() ? 'Host' : this.userRole() === 'moderator' ? 'Moderator' : 'Attendee');
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          authorName,
-          authorRole: role,
-          authorEmail: this.userEmail() || undefined,
-          content: content.trim(),
-          clientFingerprint: this.userFingerprint(),
-        }),
+      const data = await this.api.submitHumanAnswer(code, questionId, {
+        authorName,
+        authorRole: role,
+        authorEmail: this.userEmail() || undefined,
+        content: content.trim(),
+        clientFingerprint: this.userFingerprint(),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.question) {
-          this.questions.update(list => list.map(q => q.id === questionId ? data.question : q));
+      if (data) {
+        const updated = data.question;
+        if (updated) {
+          this.questions.update(list => list.map(q => q.id === questionId ? updated : q));
           this.firebaseService.updateQuestionInFirestore(code, questionId, {
-            humanAnswers: data.question.humanAnswers,
+            humanAnswers: updated.humanAnswers,
           });
         }
         this.showToast('Answer posted!');
         await this.refreshSessionData(true);
         return true;
       }
-      const errData = await res.json().catch(() => ({}));
-      this.showToast(errData.error || 'Failed to post answer');
+      this.showToast('Failed to post answer');
       return false;
     } catch (err) {
       console.error('Error submitting answer:', err);
@@ -1887,21 +1833,17 @@ export class QaService {
     if (!code) return false;
 
     try {
-      const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers/${answerId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientFingerprint: this.userFingerprint(),
-          isAdmin: this.isAdmin() || this.isSpeaker(),
-        }),
+      const data = await this.api.deleteHumanAnswer(code, questionId, answerId, {
+        clientFingerprint: this.userFingerprint(),
+        isAdmin: this.isAdmin() || this.isSpeaker(),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.question) {
-          this.questions.update(list => list.map(q => q.id === questionId ? data.question : q));
+      if (data) {
+        const updated = data.question;
+        if (updated) {
+          this.questions.update(list => list.map(q => q.id === questionId ? updated : q));
           this.firebaseService.updateQuestionInFirestore(code, questionId, {
-            humanAnswers: data.question.humanAnswers,
+            humanAnswers: updated.humanAnswers,
           });
         }
         this.showToast('Answer deleted');
@@ -1921,12 +1863,8 @@ export class QaService {
     if (!code) return false;
 
     try {
-      const res = await fetch(`/api/sessions/${code}/grounding`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contextData }),
-      });
-      if (res.ok) {
+      const ok = await this.api.updateGroundingContext(code, contextData);
+      if (ok) {
         this.currentSession.update(s => (s ? { ...s, contextData } : null));
         const updated = this.currentSession();
         if (updated) {
@@ -1948,12 +1886,8 @@ export class QaService {
     if (!code) return false;
 
     try {
-      const res = await fetch(`/api/sessions/${code}/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings }),
-      });
-      if (res.ok) {
+      const ok = await this.api.updateSettings(code, settings);
+      if (ok) {
         this.currentSession.update(s =>
           s ? { ...s, settings: { ...s.settings, ...settings } } : null
         );
@@ -1982,18 +1916,7 @@ export class QaService {
       return map.get(cacheKey)!.line1;
     }
 
-    try {
-      const res = await fetch(`/api/sessions/${code}/translate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, targetLanguage }),
-      });
-      const data = await res.json();
-      return data.translatedText || text;
-    } catch (err) {
-      console.error('Translation failed:', err);
-      return text;
-    }
+    return this.api.translateText(code, text, targetLanguage);
   }
 
   // Generate Executive Post-Session Report
@@ -2003,12 +1926,7 @@ export class QaService {
 
     this.isLoading.set(true);
     try {
-      const res = await fetch(`/api/sessions/${code}/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!res.ok) throw new Error('Report generation failed');
-      const report: PostSessionReport = await res.json();
+      const report = await this.api.generatePostSessionReport(code);
       this.isLoading.set(false);
       return report;
     } catch (err: unknown) {
@@ -2026,9 +1944,7 @@ export class QaService {
 
     this.isLoading.set(true);
     try {
-      const res = await fetch(`/api/series/${code}/report`);
-      if (!res.ok) throw new Error('Series report generation failed');
-      const report: SeriesReport = await res.json();
+      const report = await this.api.fetchSeriesReport(code);
       this.isLoading.set(false);
       return report;
     } catch (err: unknown) {
@@ -2045,12 +1961,7 @@ export class QaService {
     if (!code) return false;
 
     try {
-      const res = await fetch(`/api/sessions/${code}/participants/${fingerprint}/ban`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ banned }),
-      });
-      return res.ok;
+      return this.api.banParticipant(code, fingerprint, banned);
     } catch (err) {
       console.error('Error banning participant:', err);
       return false;
