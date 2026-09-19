@@ -20,6 +20,7 @@ import {
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
 import { ClientStorageService } from './client-storage.service';
+import { SessionApiClient } from './session-api.client';
 import { filterAndSortQuestions, selectPendingModerationQuestions, selectTopPrioritizedQuestions } from '../utils/question-filters';
 
 export type ActiveTab =
@@ -48,6 +49,7 @@ export class QaService {
   public firebaseService = inject(FirebaseService);
   private router = inject(Router);
   private storage = inject(ClientStorageService);
+  private api = inject(SessionApiClient);
 
   // Core reactive signals
   public currentSession = signal<Session | null>(null);
@@ -449,13 +451,7 @@ export class QaService {
     if (!code) return { role: 'attendee', scope: [] };
 
     try {
-      const res = await fetch(`/api/sessions/${code}/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.trim() }),
-      });
-
-      const authInfo: UserAccessInfo = await res.json();
+      const authInfo = await this.api.authenticateRole(code, token.trim());
       this.userRole.set(authInfo.role);
       this.userAuthScope.set(authInfo.scope || []);
       this.userAuthToken.set(token.trim());
@@ -711,9 +707,8 @@ export class QaService {
 
   public async fetchActiveLiveRoom(): Promise<ActiveLiveRoomPreview | null> {
     try {
-      const res = await fetch('/api/live-room');
-      if (res.ok) {
-        const data: ActiveLiveRoomPreview = await res.json();
+      const data = await this.api.fetchActiveLiveRoom();
+      if (data) {
         this.activeLiveRoom.set(data);
         return data;
       }
@@ -855,34 +850,23 @@ export class QaService {
         this.storage.setUsername(name);
       }
 
-      const res = await fetch(`/api/sessions/${code}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fingerprint: this.userFingerprint(),
-          name: this.userName() || 'Attendee',
-          adminToken: metadata?.adminToken || this.userAuthToken() || undefined,
-          title: metadata?.title,
-          description: metadata?.description,
-          type: metadata?.type,
-        }),
+      const data = await this.api.joinSession(code, {
+        fingerprint: this.userFingerprint(),
+        name: this.userName() || 'Attendee',
+        adminToken: metadata?.adminToken || this.userAuthToken() || undefined,
+        title: metadata?.title,
+        description: metadata?.description,
+        type: metadata?.type,
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Session not found or invalid room code');
-      }
-
-      const data = await res.json();
       this.currentSession.set(data.session);
 
       // Also load Series metadata if available. A plain single-session join MUST
       // clear any series left over from a previous visit, otherwise header
       // navigation would keep building /series/<single-session-code>/... URLs.
       try {
-        const seriesRes = await fetch(`/api/series/${code}`);
-        if (seriesRes.ok) {
-          const sData = await seriesRes.json();
+        const sData = await this.api.getSeries(code);
+        if (sData) {
           let series = sData.series as SessionSeries | undefined;
           if (series) {
             series = await this.mergePrivilegedSegmentTokens(code, series);
@@ -933,19 +917,7 @@ export class QaService {
     this.errorMessage.set(null);
 
     try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to create session');
-      }
-
-      const data = await res.json();
-      const session: Session = data.session || data;
+      const session = await this.api.createSession(payload);
       this.currentSession.set(session);
       this.currentSeries.set(null);
       this.userRole.set('organizer');
@@ -995,19 +967,7 @@ export class QaService {
     this.errorMessage.set(null);
 
     try {
-      const res = await fetch('/api/series', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to create workshop series');
-      }
-
-      const data = await res.json();
-      const series: SessionSeries = data.series || data;
+      const series = await this.api.createSeries(payload);
       // Keep host Gemini key server-side only — do not retain in browser state.
       if (series.geminiApiKey) {
         delete series.geminiApiKey;
@@ -1021,9 +981,8 @@ export class QaService {
       }
 
       // Also load synthetic session
-      const sessionRes = await fetch(`/api/sessions/${series.joinCode}`);
-      if (sessionRes.ok) {
-        const sessData = await sessionRes.json();
+      const sessData = await this.api.getSession(series.joinCode);
+      if (sessData) {
         this.currentSession.set(sessData.session);
       }
 
@@ -1062,26 +1021,13 @@ export class QaService {
     if (!clean || clean.length < 3) {
       return { available: false, error: 'Code must be at least 3 characters' };
     }
-    try {
-      const res = await fetch(`/api/check-code/${encodeURIComponent(clean)}`);
-      if (res.ok) {
-        const data = await res.json();
-        return { available: !!data.available, error: data.error };
-      }
-      return { available: true };
-    } catch {
-      return { available: true };
-    }
+    return this.api.checkCodeAvailability(clean);
   }
 
   public async generateSuggestedCode(prefix = ''): Promise<string> {
     try {
-      const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : '';
-      const res = await fetch(`/api/generate-code${query}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.code) return data.code;
-      }
+      const data = await this.api.generateSuggestedCode(prefix);
+      if (data.code) return data.code;
     } catch {
       // Fallback local random generator
     }
@@ -1261,20 +1207,6 @@ export class QaService {
     }
   }
 
-  /** GET /api/series/:code/segments with a staff Bearer token — the only endpoint that returns real adminTokens. */
-  private async fetchPrivilegedSegments(code: string, token: string): Promise<Segment[] | null> {
-    try {
-      const res = await fetch(`/api/series/${code}/segments`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.segments || []) as Segment[];
-    } catch {
-      return null;
-    }
-  }
-
   /**
    * Public GET /api/series strips adminTokens. Organizers/speakers need them
    * for Speaker Link copy — rehydrate from the privileged segments endpoint.
@@ -1287,10 +1219,10 @@ export class QaService {
     if (!token || !series.segments?.length) return series;
     if (!this.isOrganizer() && !this.isSpeaker()) return series;
 
-    const privileged = await this.fetchPrivilegedSegments(code, token);
-    if (!privileged?.length) return series;
+    const data = await this.api.getPrivilegedSegments(code, token);
+    if (!data?.segments?.length) return series;
 
-    const byId = new Map(privileged.map(s => [s.id, s]));
+    const byId = new Map(data.segments.map(s => [s.id, s]));
     const merged = series.segments.map(seg => {
       const full = byId.get(seg.id);
       if (!full) return seg;
@@ -1377,19 +1309,16 @@ export class QaService {
     }
 
     try {
-      const [apiRes, firestoreClaims] = await Promise.all([
-        fetch(`/api/speaker/invites?email=${encodeURIComponent(resolved)}`).catch(() => null),
+      const [data, firestoreClaims] = await Promise.all([
+        this.api.fetchSpeakerInvites(resolved),
         this.firebaseService.loadSpeakerInvitesFromFirestore(resolved),
       ]);
 
       const byKey = new Map<string, SpeakerInviteRecord>();
 
-      if (apiRes && apiRes.ok) {
-        const data = await apiRes.json();
-        const invites: SpeakerInviteRecord[] = Array.isArray(data.invites) ? data.invites : [];
-        for (const inv of invites) {
-          byKey.set(`${inv.joinCode}_${inv.segmentId}`, inv);
-        }
+      const invitesFromApi: SpeakerInviteRecord[] = Array.isArray(data.invites) ? data.invites : [];
+      for (const inv of invitesFromApi) {
+        byKey.set(`${inv.joinCode}_${inv.segmentId}`, inv);
       }
 
       for (const claim of firestoreClaims) {
@@ -1451,8 +1380,8 @@ export class QaService {
     const cached = this.currentSeries()?.segments?.find(s => s.id === segmentId)?.adminToken;
     if (isValidToken(cached)) return cached;
 
-    const privileged = await this.fetchPrivilegedSegments(code, token);
-    const seg = privileged?.find(s => s.id === segmentId);
+    const data = await this.api.getPrivilegedSegments(code, token);
+    const seg = data?.segments?.find(s => s.id === segmentId);
     return isValidToken(seg?.adminToken) ? seg.adminToken : null;
   }
 
@@ -1489,21 +1418,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/segments/${segmentId}/start`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ token }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to start segment');
-      }
-
-      const data = await res.json();
+      const data = await this.api.startSegment(code, segmentId, token);
       if (data.series) {
         this.currentSeries.set(data.series);
       }
@@ -1523,21 +1438,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/segments/${segmentId}/end`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ token }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to end segment');
-      }
-
-      const data = await res.json();
+      const data = await this.api.endSegment(code, segmentId, token);
       if (data.series) {
         this.currentSeries.set(data.series);
       }
@@ -1562,17 +1463,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ...payload, token }),
-      });
-
-      if (!res.ok) throw new Error('Failed to update series');
-      const data = await res.json();
+      const data = await this.api.updateSeries(code, payload, token);
       if (data.series) {
         const merged = await this.mergePrivilegedSegmentTokens(code, data.series);
         this.currentSeries.set(merged);
@@ -1595,16 +1486,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/segments/${segmentId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ...payload, token }),
-      });
-
-      if (!res.ok) throw new Error('Failed to update segment');
+      await this.api.updateSegment(code, segmentId, payload, token);
 
       this.applyOptimisticSegmentPatch(segmentId, payload);
       this.showToast('Segment details saved successfully');
@@ -1682,16 +1564,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/segments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ...payload, token }),
-      });
-
-      if (!res.ok) throw new Error('Failed to add segment');
+      await this.api.addSegment(code, payload, token);
       this.showToast('New segment added to run of show');
       await this.refreshSessionData(true);
       const series = this.currentSeries();
@@ -1712,16 +1585,7 @@ export class QaService {
 
     const token = this.userAuthToken();
     try {
-      const res = await fetch(`/api/series/${code}/segments/reorder`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ segmentIds, token }),
-      });
-
-      if (!res.ok) throw new Error('Failed to reorder segments');
+      await this.api.reorderSegments(code, segmentIds, token);
       this.showToast('Schedule order updated');
       await this.refreshSessionData(true);
       return true;
