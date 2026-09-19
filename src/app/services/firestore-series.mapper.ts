@@ -1,7 +1,17 @@
-import { Segment, Series, SessionSeries, SpeakerProfile } from '../models/qa.models';
+import { Segment, Series, SessionSeries, SpeakerInviteRecord, SpeakerProfile } from '../models/qa.models';
 
 /** Firestore schema version for series documents. Bump when shape changes. */
 export const SERIES_SCHEMA_VERSION = 1;
+
+const DEFAULT_TALK_TITLE = 'Talk';
+const DEFAULT_SERIES_TITLE = 'Workshop Series';
+const DEFAULT_SPEAKER_NAME = 'Speaker';
+const DEFAULT_CATEGORY = 'General';
+const DEFAULT_DURATION_MINUTES = 45;
+const DEFAULT_GRACE_WINDOW_MINUTES = 5;
+const DEFAULT_START_TIME = '09:00';
+const DEFAULT_TIMEZONE = 'UTC';
+const DEFAULT_SERIES_STATE: Series['state'] = 'SCHEDULED';
 
 export interface FirestoreSpeakerProfile {
   name: string;
@@ -67,17 +77,8 @@ export interface FirestoreSeriesDoc {
   updatedAt: string;
 }
 
-export interface FirestoreSpeakerInviteClaim {
-  joinCode: string;
-  seriesTitle: string;
-  seriesState: string;
-  segmentId: string;
-  segmentTitle: string;
-  speakerName: string;
-  speakerEmail: string;
-  adminToken: string;
-  status: string;
-  order: number;
+/** Firestore doc shape for a claim; same fields as SpeakerInviteRecord plus a sync timestamp. */
+export interface FirestoreSpeakerInviteClaim extends SpeakerInviteRecord {
   updatedAt: string;
 }
 
@@ -88,7 +89,7 @@ export function clean(value: unknown): string {
 export function toFirestoreSpeaker(seg: Segment): FirestoreSpeakerProfile {
   const nested = seg.speaker;
   return {
-    name: clean(seg.speakerName) || clean(nested?.name) || 'Speaker',
+    name: clean(seg.speakerName) || clean(nested?.name) || DEFAULT_SPEAKER_NAME,
     role: clean(seg.speakerRole) || clean(nested?.title),
     org: clean(seg.speakerOrg) || clean(nested?.org),
     bio: clean(seg.speakerBio) || clean(nested?.bio),
@@ -114,21 +115,21 @@ export function toFirestoreSegment(
     seriesId: series.id || seg.seriesId || series.joinCode,
     joinCode: series.joinCode.toUpperCase(),
     order: typeof seg.order === 'number' ? seg.order : 0,
-    title: clean(seg.title) || 'Talk',
-    talkTitle: clean(seg.talkTitle) || clean(seg.title) || 'Talk',
+    title: clean(seg.title) || DEFAULT_TALK_TITLE,
+    talkTitle: clean(seg.talkTitle) || clean(seg.title) || DEFAULT_TALK_TITLE,
     type: seg.type || 'TALK',
     status: seg.status || seg.state || 'SCHEDULED',
     state: seg.state || seg.status || 'SCHEDULED',
     sessionDescription,
     topicSummary: clean(seg.topicSummary) || sessionDescription,
     groundingContext: clean(seg.groundingContext) || clean(seg.contextData),
-    categories: Array.isArray(seg.categories) && seg.categories.length ? seg.categories : ['General'],
-    durationMinutes: seg.durationMinutes || seg.scheduledDurationMinutes || 45,
-    scheduledDurationMinutes: seg.scheduledDurationMinutes || seg.durationMinutes || 45,
-    startTime: clean(seg.startTime) || '09:00',
+    categories: Array.isArray(seg.categories) && seg.categories.length ? seg.categories : [DEFAULT_CATEGORY],
+    durationMinutes: seg.durationMinutes || seg.scheduledDurationMinutes || DEFAULT_DURATION_MINUTES,
+    scheduledDurationMinutes: seg.scheduledDurationMinutes || seg.durationMinutes || DEFAULT_DURATION_MINUTES,
+    startTime: clean(seg.startTime) || DEFAULT_START_TIME,
     scheduledStart: clean(seg.scheduledStart) || clean(seg.startTime) || nowIso,
     speaker,
-    graceWindowMinutes: seg.graceWindowMinutes ?? 5,
+    graceWindowMinutes: seg.graceWindowMinutes ?? DEFAULT_GRACE_WINDOW_MINUTES,
     schemaVersion: SERIES_SCHEMA_VERSION,
     updatedAt: nowIso,
     createdAt: nowIso,
@@ -150,10 +151,10 @@ export function toFirestoreSeries(
     id: series.id || joinCode,
     joinCode,
     seriesCode: (series.seriesCode || joinCode).toUpperCase(),
-    title: clean(series.title) || 'Workshop Series',
+    title: clean(series.title) || DEFAULT_SERIES_TITLE,
     description: clean(series.description),
-    state: series.state || 'SCHEDULED',
-    timezone: clean(series.timezone) || 'UTC',
+    state: series.state || DEFAULT_SERIES_STATE,
+    timezone: clean(series.timezone) || DEFAULT_TIMEZONE,
     startDate: clean(series.startDate) || nowIso,
     activeSegmentId: series.activeSegmentId || series.liveSegmentId || null,
     segmentIds,
@@ -164,6 +165,34 @@ export function toFirestoreSeries(
     schemaVersion: SERIES_SCHEMA_VERSION,
     createdAt: clean(series.createdAt) || nowIso,
     updatedAt: nowIso,
+  };
+}
+
+/** Inverse of toFirestoreSeries — hydrates series metadata from a Firestore doc snapshot. */
+export function fromFirestoreSeries(
+  data: Partial<FirestoreSeriesDoc>,
+  fallbackCode: string,
+  segments: Segment[]
+): Partial<Series> {
+  const code = clean(data.joinCode) || fallbackCode;
+  return {
+    id: clean(data.id) || code,
+    joinCode: code,
+    seriesCode: clean(data.seriesCode) || code,
+    title: clean(data.title) || DEFAULT_SERIES_TITLE,
+    description: clean(data.description),
+    state: (data.state as Series['state']) || DEFAULT_SERIES_STATE,
+    timezone: clean(data.timezone) || DEFAULT_TIMEZONE,
+    startDate: clean(data.startDate),
+    activeSegmentId: data.activeSegmentId || null,
+    liveSegmentId: data.activeSegmentId || null,
+    segmentIds: Array.isArray(data.segmentIds) && data.segmentIds.length ? data.segmentIds : segments.map(s => s.id),
+    settings: data.settings as unknown as Series['settings'],
+    revision: Number(data.revision) || 1,
+    creatorUid: clean(data.creatorUid),
+    updatedAt: clean(data.updatedAt),
+    createdAt: clean(data.createdAt),
+    segments,
   };
 }
 
@@ -189,7 +218,7 @@ export interface FromFirestoreSpeakerResult {
 export function fromFirestoreSpeaker(
   data: Partial<FirestoreSpeakerProfile> | undefined
 ): FromFirestoreSpeakerResult {
-  const name = clean(data?.name) || 'Speaker';
+  const name = clean(data?.name) || DEFAULT_SPEAKER_NAME;
   const nested: SpeakerProfile = {
     name,
     title: clean(data?.role) || undefined,
@@ -227,20 +256,22 @@ export function fromFirestoreSegment(
   return {
     id: data.id || fallbackId,
     seriesId: clean(data.seriesId) || clean(data.joinCode),
-    title: clean(data.title) || 'Talk',
-    talkTitle: clean(data.talkTitle) || clean(data.title) || 'Talk',
+    title: clean(data.title) || DEFAULT_TALK_TITLE,
+    talkTitle: clean(data.talkTitle) || clean(data.title) || DEFAULT_TALK_TITLE,
+    // Never carried on the public segment doc — see FirestoreSegmentDoc.
+    adminToken: '',
     type: (data.type as Segment['type']) || 'TALK',
     status: (data.status as Segment['status']) || 'SCHEDULED',
     state: (data.state as Segment['state']) || 'SCHEDULED',
-    startTime: clean(data.startTime) || '09:00',
+    startTime: clean(data.startTime) || DEFAULT_START_TIME,
     scheduledStart: clean(data.scheduledStart) || undefined,
-    scheduledDurationMinutes: data.scheduledDurationMinutes || data.durationMinutes || 45,
-    durationMinutes: data.durationMinutes || data.scheduledDurationMinutes || 45,
+    scheduledDurationMinutes: data.scheduledDurationMinutes || data.durationMinutes || DEFAULT_DURATION_MINUTES,
+    durationMinutes: data.durationMinutes || data.scheduledDurationMinutes || DEFAULT_DURATION_MINUTES,
     groundingContext: clean(data.groundingContext) || undefined,
     contextData: clean(data.groundingContext) || undefined,
-    categories: Array.isArray(data.categories) && data.categories.length ? data.categories : ['General'],
+    categories: Array.isArray(data.categories) && data.categories.length ? data.categories : [DEFAULT_CATEGORY],
     order: typeof data.order === 'number' ? data.order : 0,
-    graceWindowMinutes: data.graceWindowMinutes ?? 5,
+    graceWindowMinutes: data.graceWindowMinutes ?? DEFAULT_GRACE_WINDOW_MINUTES,
     sessionDescription: sessionDescription || undefined,
     topicSummary: clean(data.topicSummary) || sessionDescription || undefined,
     speaker: speakerParts.nested,

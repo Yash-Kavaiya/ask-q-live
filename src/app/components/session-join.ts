@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
+import { formatFirebaseAuthError } from '../services/firebase-auth-errors';
 import { HostedSessionRecord, ModerationSensitivity, Segment, SegmentType } from '../models/qa.models';
 import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
 
@@ -1240,7 +1241,7 @@ export class SessionJoin implements OnInit {
         this.qaService.showToast(`Signed in as ${user.displayName || user.email}!`);
       }
     } catch (err: unknown) {
-      this.authError.set(err instanceof Error ? err.message : 'Google sign in failed');
+      this.authError.set(formatFirebaseAuthError(err, 'Google sign in failed'));
     } finally {
       this.isAuthLoading.set(false);
     }
@@ -1281,7 +1282,7 @@ export class SessionJoin implements OnInit {
         );
       }
     } catch (err: unknown) {
-      this.authError.set(err instanceof Error ? err.message : 'Authentication failed');
+      this.authError.set(formatFirebaseAuthError(err, 'Authentication failed'));
     } finally {
       this.isAuthLoading.set(false);
     }

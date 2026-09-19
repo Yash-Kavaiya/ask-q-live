@@ -20,6 +20,7 @@ import {
 import {
   getAuth,
   Auth,
+  User,
   signInAnonymously,
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -33,13 +34,18 @@ import firebaseConfigData from '../../../firebase-applet-config.json';
 import { resolveFirebaseApiKey } from '../firebase';
 import { Question, Session, QuestionStatus, Segment, Series, SessionSeries } from '../models/qa.models';
 import {
+  clean,
+  fromFirestoreSeries,
   fromFirestoreSegment,
   normalizeInviteEmail,
   speakerInviteDocId,
   toFirestoreSegment,
   toFirestoreSeries,
+  FirestoreSeriesDoc,
   FirestoreSpeakerInviteClaim,
 } from './firestore-series.mapper';
+
+export { formatFirebaseAuthError } from './firebase-auth-errors';
 
 /** Minimal organizer identity used by UI + guards (Firebase User or local fallback). */
 export interface OrganizerAuthUser {
@@ -54,7 +60,15 @@ interface LocalAccountRecord {
   email: string;
   displayName: string;
   passwordHash: string;
+  /** Absent means a legacy unsalted SHA-256 hash; upgraded on next successful sign-in. */
+  passwordSalt?: string;
   createdAt: string;
+}
+
+function bytesToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 @Injectable({
@@ -77,6 +91,9 @@ export class FirebaseService {
   private static readonly AUTH_READY_TIMEOUT_MS = 5000;
   private static readonly LOCAL_ACCOUNTS_KEY = 'askq_local_organizer_accounts';
   private static readonly LOCAL_SESSION_KEY = 'askq_local_organizer_session';
+  private static readonly PBKDF2_ITERATIONS = 100_000;
+  private static readonly PBKDF2_KEY_LENGTH_BITS = 256;
+  private static readonly MIN_LOCAL_PASSWORD_LENGTH = 6;
 
   // Resolves once Firebase has had a chance to rehydrate persisted auth (i.e.
   // on the FIRST onAuthStateChanged emission), or after AUTH_READY_TIMEOUT_MS
@@ -156,12 +173,35 @@ export class FirebaseService {
     localStorage.setItem(FirebaseService.LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
   }
 
-  private async hashPassword(password: string): Promise<string> {
-    const data = new TextEncoder().encode(password);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
+  /** Legacy unsalted hash, kept only to verify accounts created before salting was added. */
+  private async hashPasswordLegacy(password: string): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+    return bytesToHex(digest);
+  }
+
+  private async hashPassword(password: string, salt: string): Promise<string> {
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(password),
+      'PBKDF2',
+      false,
+      ['deriveBits']
+    );
+    const bits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: new TextEncoder().encode(salt),
+        iterations: FirebaseService.PBKDF2_ITERATIONS,
+        hash: 'SHA-256',
+      },
+      keyMaterial,
+      FirebaseService.PBKDF2_KEY_LENGTH_BITS
+    );
+    return bytesToHex(bits);
+  }
+
+  private generateSalt(): string {
+    return crypto.randomUUID().replace(/-/g, '');
   }
 
   private async signUpLocally(
@@ -170,8 +210,10 @@ export class FirebaseService {
     displayName?: string
   ): Promise<OrganizerAuthUser> {
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !pass || pass.length < 6) {
-      throw new Error('Please provide a valid email and a password of at least 6 characters.');
+    if (!normalizedEmail || !pass || pass.length < FirebaseService.MIN_LOCAL_PASSWORD_LENGTH) {
+      throw new Error(
+        `Please provide a valid email and a password of at least ${FirebaseService.MIN_LOCAL_PASSWORD_LENGTH} characters.`
+      );
     }
 
     const accounts = this.readLocalAccounts();
@@ -186,11 +228,13 @@ export class FirebaseService {
       isAnonymous: false,
     };
 
+    const salt = this.generateSalt();
     accounts.push({
       uid: user.uid,
       email: normalizedEmail,
       displayName: user.displayName || normalizedEmail.split('@')[0],
-      passwordHash: await this.hashPassword(pass),
+      passwordHash: await this.hashPassword(pass, salt),
+      passwordSalt: salt,
       createdAt: new Date().toISOString(),
     });
     this.writeLocalAccounts(accounts);
@@ -207,9 +251,19 @@ export class FirebaseService {
       throw new Error('No account found for this email. Create a host account first.');
     }
 
-    const hash = await this.hashPassword(pass);
-    if (hash !== account.passwordHash) {
+    const isMatch = account.passwordSalt
+      ? (await this.hashPassword(pass, account.passwordSalt)) === account.passwordHash
+      : (await this.hashPasswordLegacy(pass)) === account.passwordHash;
+    if (!isMatch) {
       throw new Error('Incorrect password. Please try again.');
+    }
+
+    if (!account.passwordSalt) {
+      // Transparently upgrade legacy unsalted accounts on next successful sign-in.
+      const salt = this.generateSalt();
+      account.passwordSalt = salt;
+      account.passwordHash = await this.hashPassword(pass, salt);
+      this.writeLocalAccounts(accounts);
     }
 
     const user: OrganizerAuthUser = {
@@ -266,16 +320,7 @@ export class FirebaseService {
       this.auth = getAuth(this.app);
 
       onAuthStateChanged(this.auth, (user) => {
-        this.currentUser.set(
-          user
-            ? {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
-                isAnonymous: user.isAnonymous,
-              }
-            : null
-        );
+        this.currentUser.set(user ? this.toOrganizerAuthUser(user) : null);
         if (user) {
           this.isConnected.set(true);
           this.connectionStatus.set('connected');
@@ -310,6 +355,15 @@ export class FirebaseService {
     return !!user && !user.isAnonymous;
   }
 
+  private toOrganizerAuthUser(user: User, displayNameOverride?: string): OrganizerAuthUser {
+    return {
+      uid: user.uid,
+      email: user.email,
+      displayName: displayNameOverride || user.displayName,
+      isAnonymous: user.isAnonymous,
+    };
+  }
+
   // Google Sign-In helper (for organizers and presenters)
   public async signInWithGoogle(): Promise<OrganizerAuthUser | null> {
     if (!this.auth) {
@@ -325,12 +379,7 @@ export class FirebaseService {
       provider.addScope('profile');
       provider.addScope('email');
       const result = await signInWithPopup(this.auth, provider);
-      const user: OrganizerAuthUser = {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        isAnonymous: result.user.isAnonymous,
-      };
+      const user = this.toOrganizerAuthUser(result.user);
       this.currentUser.set(user);
       this.localAuthFallback.set(false);
       this.connectionStatus.set('connected');
@@ -349,12 +398,7 @@ export class FirebaseService {
     }
     try {
       const result = await signInWithEmailAndPassword(this.auth, email.trim(), pass);
-      const user: OrganizerAuthUser = {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: result.user.displayName,
-        isAnonymous: result.user.isAnonymous,
-      };
+      const user = this.toOrganizerAuthUser(result.user);
       this.currentUser.set(user);
       return user;
     } catch (err: unknown) {
@@ -377,12 +421,7 @@ export class FirebaseService {
       if (displayName && result.user) {
         await updateProfile(result.user, { displayName });
       }
-      const user: OrganizerAuthUser = {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: displayName || result.user.displayName,
-        isAnonymous: result.user.isAnonymous,
-      };
+      const user = this.toOrganizerAuthUser(result.user, displayName);
       this.currentUser.set(user);
       return user;
     } catch (err: unknown) {
@@ -684,7 +723,7 @@ export class FirebaseService {
             segmentTitle: segDoc.title,
             speakerName: segDoc.speaker.name,
             speakerEmail: segDoc.speaker.email,
-            adminToken: segDoc.adminToken,
+            adminToken: clean(seg.adminToken),
             status: segDoc.status,
             order: segDoc.order,
             updatedAt: nowIso,
@@ -714,7 +753,9 @@ export class FirebaseService {
       await batch.commit();
       return true;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Firestore syncSeries failed';
       console.warn('Firestore syncSeries note:', err);
+      this.lastError.set(message);
       return false;
     }
   }
@@ -752,7 +793,7 @@ export class FirebaseService {
           segmentTitle: segDoc.title,
           speakerName: segDoc.speaker.name,
           speakerEmail: email,
-          adminToken: segDoc.adminToken,
+          adminToken: clean(seg.adminToken),
           status: segDoc.status,
           order: segDoc.order,
           updatedAt: nowIso,
@@ -773,7 +814,9 @@ export class FirebaseService {
       await batch.commit();
       return true;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Firestore syncSegment failed';
       console.warn('Firestore syncSegment note:', err);
+      this.lastError.set(message);
       return false;
     }
   }
@@ -790,7 +833,7 @@ export class FirebaseService {
       const seriesSnap = await getDoc(doc(this.db, 'series', code));
       if (!seriesSnap.exists()) return null;
 
-      const data = seriesSnap.data();
+      const data = seriesSnap.data() as Partial<FirestoreSeriesDoc>;
       const segsSnap = await getDocs(
         query(collection(this.db, 'series', code, 'segments'), orderBy('order', 'asc'))
       );
@@ -799,29 +842,13 @@ export class FirebaseService {
       );
 
       return {
-        series: {
-          id: String(data['id'] || code),
-          joinCode: code,
-          seriesCode: String(data['seriesCode'] || code),
-          title: String(data['title'] || 'Workshop Series'),
-          description: String(data['description'] || ''),
-          state: data['state'],
-          timezone: String(data['timezone'] || 'UTC'),
-          startDate: String(data['startDate'] || ''),
-          activeSegmentId: data['activeSegmentId'] || null,
-          liveSegmentId: data['activeSegmentId'] || null,
-          segmentIds: Array.isArray(data['segmentIds']) ? data['segmentIds'] : segments.map(s => s.id),
-          settings: data['settings'],
-          revision: Number(data['revision']) || 1,
-          creatorUid: String(data['creatorUid'] || ''),
-          updatedAt: String(data['updatedAt'] || ''),
-          createdAt: String(data['createdAt'] || ''),
-          segments,
-        } as Partial<Series>,
+        series: fromFirestoreSeries(data, code, segments),
         segments,
       };
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Firestore loadSeries failed';
       console.warn('Firestore loadSeries note:', err);
+      this.lastError.set(message);
       return null;
     }
   }
@@ -838,7 +865,9 @@ export class FirebaseService {
         .map(d => d.data() as FirestoreSpeakerInviteClaim)
         .sort((a, b) => (a.order || 0) - (b.order || 0));
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Firestore loadSpeakerInvites failed';
       console.warn('Firestore loadSpeakerInvites note:', err);
+      this.lastError.set(message);
       return [];
     }
   }

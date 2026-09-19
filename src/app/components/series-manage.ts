@@ -5,6 +5,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { Segment } from '../models/qa.models';
 
+type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerLinkedIn' | 'speakerWebsite';
+
 @Component({
   selector: 'app-series-manage',
   imports: [CommonModule, ReactiveFormsModule, MatIconModule],
@@ -187,7 +189,7 @@ import { Segment } from '../models/qa.models';
                     </div>
                     <button
                       type="button"
-                      (click)="copySpeakerLink(seg)"
+                      (click)="qaService.copySpeakerLink(seg)"
                       class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg cursor-pointer shrink-0"
                     >
                       <mat-icon class="text-sm">link</mat-icon>
@@ -307,14 +309,14 @@ export class SeriesManage implements OnInit {
     }
   }
 
-  public draft(segId: string, field: string, fallback?: string | null): string {
+  public draft(segId: string, field: SpeakerDraftField, fallback?: string | null): string {
     const key = `${segId}:${field}`;
     const map = this.drafts();
     if (key in map) return map[key];
     return fallback || '';
   }
 
-  public setDraft(segId: string, field: string, value: string): void {
+  public setDraft(segId: string, field: SpeakerDraftField, value: string): void {
     const key = `${segId}:${field}`;
     this.drafts.update(m => ({ ...m, [key]: value }));
   }
@@ -355,7 +357,7 @@ export class SeriesManage implements OnInit {
     const speakerWebsite = this.draft(seg.id, 'speakerWebsite', seg.speakerWebsite).trim();
 
     this.savingSegId.set(seg.id);
-    await this.qaService.updateSegment(seg.id, {
+    const ok = await this.qaService.updateSegment(seg.id, {
       speakerEmail: email,
       sessionDescription,
       topicSummary: sessionDescription,
@@ -364,31 +366,8 @@ export class SeriesManage implements OnInit {
       speakerWebsite,
     });
     this.savingSegId.set(null);
-  }
-
-  public async copySpeakerLink(seg: Segment): Promise<void> {
-    const code = this.qaService.currentSeries()?.joinCode;
-    if (!code) return;
-
-    const adminToken = await this.qaService.resolveSpeakerAdminToken(seg.id);
-    if (!adminToken) {
-      this.qaService.showToast('Could not resolve speaker token. Re-authenticate as organizer.');
-      return;
-    }
-
-    const series = this.qaService.currentSeries();
-    if (series?.segments) {
-      this.qaService.currentSeries.set({
-        ...series,
-        segments: series.segments.map(s => (s.id === seg.id ? { ...s, adminToken } : s)),
-      });
-    }
-
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const url = `${origin}/?joinCode=${code}&token=${adminToken}`;
-    if (navigator.clipboard) {
-      await navigator.clipboard.writeText(url);
-      this.qaService.showToast(`Speaker link copied for ${seg.speakerName}`);
+    if (!ok) {
+      this.qaService.showToast(this.qaService.errorMessage() || 'Could not save speaker profile');
     }
   }
 }

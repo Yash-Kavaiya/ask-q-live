@@ -12,6 +12,7 @@ import {
   translateContent,
   generatePostSessionReport,
   extractDocumentText,
+  isPlausibleApiKey,
 } from './server/gemini.service.js';
 import {
   requireAuth,
@@ -159,16 +160,6 @@ app.get('/api/speaker/invites', (req, res) => {
   res.json({ email, invites });
 });
 
-app.post('/api/speaker/claim', (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  if (!email || !email.includes('@')) {
-    res.status(400).json({ error: 'A valid speaker email is required' });
-    return;
-  }
-  const invites = qaStore.findSpeakerInvitesByEmail(email);
-  res.json({ email, invites });
-});
-
 // 1c. Patch Series (Organizer only)
 app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) => {
   const code = getCode(req);
@@ -196,8 +187,7 @@ app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) =
   }
   if (geminiApiKey !== undefined) {
     const key = typeof geminiApiKey === 'string' ? geminiApiKey.trim() : '';
-    series.geminiApiKey =
-      key && key.length >= 10 && key !== 'MY_GEMINI_API_KEY' && key !== 'TODO' ? key : undefined;
+    series.geminiApiKey = isPlausibleApiKey(key) ? key : undefined;
   }
   series.revision = (series.revision || 1) + 1;
   series.updatedAt = new Date().toISOString();

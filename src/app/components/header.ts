@@ -17,7 +17,7 @@ import { FirebaseService } from '../services/firebase.service';
           
           <!-- Logo & Session Info -->
           <div class="flex items-center gap-3 min-w-0">
-            @if ((qaService.currentSession() || qaService.currentSeries()) && (qaService.isStaff() || firebaseService.isOrganizerLoggedIn())) {
+            @if (canReturnToHostStudio()) {
               <button
                 id="btn-nav-back-host-studio"
                 type="button"
@@ -212,7 +212,7 @@ import { FirebaseService } from '../services/firebase.service';
                 }
               </a>
 
-              @if (qaService.isOrganizer() && qaService.currentSeries()) {
+              @if (canManageSeries()) {
                 <a
                   id="nav-tab-manage"
                   [routerLink]="[nav().base, nav().code, 'manage']"
@@ -238,7 +238,7 @@ import { FirebaseService } from '../services/firebase.service';
                 <span>Teleprompter</span>
               </a>
 
-              @if (!qaService.isSpeaker()) {
+              @if (canSeeAnalyticsAndReport()) {
                 <a
                   id="nav-tab-analytics"
                   [routerLink]="[nav().base, nav().code, 'analytics']"
@@ -269,7 +269,7 @@ import { FirebaseService } from '../services/firebase.service';
                 </a>
               }
 
-              @if (qaService.isAdmin() || qaService.isSpeaker()) {
+              @if (canSeeGrounding()) {
                 <a
                   id="nav-tab-grounding"
                   [routerLink]="[nav().base, nav().code, 'grounding']"
@@ -283,7 +283,7 @@ import { FirebaseService } from '../services/firebase.service';
                 </a>
               }
 
-              @if (!qaService.isSpeaker()) {
+              @if (canSeeAnalyticsAndReport()) {
                 <a
                   id="nav-tab-report"
                   [routerLink]="[nav().base, nav().code, 'report']"
@@ -342,7 +342,7 @@ import { FirebaseService } from '../services/firebase.service';
               Run of Show
             </a>
 
-            @if (qaService.isOrganizer() && qaService.currentSeries()) {
+            @if (canManageSeries()) {
               <a
                 id="mob-tab-manage"
                 [routerLink]="[nav().base, nav().code, 'manage']"
@@ -370,19 +370,19 @@ import { FirebaseService } from '../services/firebase.service';
               Teleprompter
             </a>
 
-            @if (!qaService.isSpeaker()) {
-            <a
-              id="mob-tab-analytics"
-              [routerLink]="[nav().base, nav().code, 'analytics']"
-              class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
-              [class.bg-indigo-600]="qaService.activeTab() === 'analytics'"
-              [class.text-white]="qaService.activeTab() === 'analytics'"
-              [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'analytics'"
-              [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
-            >
-              <mat-icon class="text-sm">insights</mat-icon>
-              Analytics
-            </a>
+            @if (canSeeAnalyticsAndReport()) {
+              <a
+                id="mob-tab-analytics"
+                [routerLink]="[nav().base, nav().code, 'analytics']"
+                class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
+                [class.bg-indigo-600]="qaService.activeTab() === 'analytics'"
+                [class.text-white]="qaService.activeTab() === 'analytics'"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'analytics'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'analytics'"
+              >
+                <mat-icon class="text-sm">insights</mat-icon>
+                Analytics
+              </a>
             }
 
             @if (qaService.isAdmin()) {
@@ -400,7 +400,7 @@ import { FirebaseService } from '../services/firebase.service';
               </a>
             }
 
-            @if (qaService.isAdmin() || qaService.isSpeaker()) {
+            @if (canSeeGrounding()) {
               <a
                 id="mob-tab-grounding"
                 [routerLink]="[nav().base, nav().code, 'grounding']"
@@ -415,19 +415,19 @@ import { FirebaseService } from '../services/firebase.service';
               </a>
             }
 
-            @if (!qaService.isSpeaker()) {
-            <a
-              id="mob-tab-report"
-              [routerLink]="[nav().base, nav().code, 'report']"
-              class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
-              [class.bg-indigo-600]="qaService.activeTab() === 'report'"
-              [class.text-white]="qaService.activeTab() === 'report'"
-              [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'report'"
-              [class.text-[#444746]]="qaService.activeTab() !== 'report'"
-            >
-              <mat-icon class="text-sm">summarize</mat-icon>
-              Report
-            </a>
+            @if (canSeeAnalyticsAndReport()) {
+              <a
+                id="mob-tab-report"
+                [routerLink]="[nav().base, nav().code, 'report']"
+                class="px-3 py-1.5 rounded-lg whitespace-nowrap font-medium flex items-center gap-1 shrink-0"
+                [class.bg-indigo-600]="qaService.activeTab() === 'report'"
+                [class.text-white]="qaService.activeTab() === 'report'"
+                [class.bg-[#F1F3F4]]="qaService.activeTab() !== 'report'"
+                [class.text-[#444746]]="qaService.activeTab() !== 'report'"
+              >
+                <mat-icon class="text-sm">summarize</mat-icon>
+                Report
+              </a>
             }
           </div>
         }
@@ -450,6 +450,17 @@ export class Header {
     if (session) return { base: '/session', code: session.joinCode };
     return { base: '/session', code: '' };
   });
+
+  // Tab-visibility rules, shared by the desktop nav and the mobile tab bar
+  // below so a rule only ever needs to change in one place.
+  public canReturnToHostStudio = computed(
+    () =>
+      !!(this.qaService.currentSession() || this.qaService.currentSeries()) &&
+      (this.qaService.isStaff() || this.firebaseService.isOrganizerLoggedIn())
+  );
+  public canManageSeries = computed(() => this.qaService.isOrganizer() && !!this.qaService.currentSeries());
+  public canSeeAnalyticsAndReport = computed(() => !this.qaService.isSpeaker());
+  public canSeeGrounding = computed(() => this.qaService.isAdmin() || this.qaService.isSpeaker());
 
   public copyJoinCode(code: string): void {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {

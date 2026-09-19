@@ -34,6 +34,11 @@ const TAB_URL_SEGMENTS: Partial<Record<ActiveTab, string>> = {
   'series-control': 'run-of-show',
 };
 
+/** Excludes empty/placeholder tokens — some upstream calls stringify a missing token as "undefined"/"null". */
+function isValidToken(token: string | null | undefined): token is string {
+  return !!token && token !== 'undefined' && token !== 'null';
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -371,14 +376,8 @@ export class QaService {
     if (typeof window !== 'undefined' && window.location) {
       // A staff ?token= is honoured on every URL shape, canonical or legacy.
       const params = new URLSearchParams(window.location.search);
-      const rawToken = params.get('token');
-      const urlToken =
-        rawToken &&
-        rawToken !== 'undefined' &&
-        rawToken !== 'null' &&
-        rawToken.trim().length > 0
-          ? rawToken.trim()
-          : null;
+      const trimmedToken = params.get('token')?.trim();
+      const urlToken = isValidToken(trimmedToken) ? trimmedToken : null;
       if (urlToken) {
         this.userAuthToken.set(urlToken);
         localStorage.setItem('live_qa_auth_token', urlToken);
@@ -993,7 +992,7 @@ export class QaService {
 
       // Verify any saved token
       const existingToken = this.userAuthToken();
-      if (existingToken && existingToken !== 'undefined' && existingToken !== 'null') {
+      if (isValidToken(existingToken)) {
         await this.authenticateRole(existingToken);
         if (this.isSpeaker() && this.speakerSegmentId()) {
           this.selectedSegmentFilter.set(this.speakerSegmentId()!);
@@ -1353,6 +1352,20 @@ export class QaService {
     }
   }
 
+  /** GET /api/series/:code/segments with a staff Bearer token — the only endpoint that returns real adminTokens. */
+  private async fetchPrivilegedSegments(code: string, token: string): Promise<Segment[] | null> {
+    try {
+      const res = await fetch(`/api/series/${code}/segments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.segments || []) as Segment[];
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Public GET /api/series strips adminTokens. Organizers/speakers need them
    * for Speaker Link copy — rehydrate from the privileged segments endpoint.
@@ -1365,34 +1378,25 @@ export class QaService {
     if (!token || !series.segments?.length) return series;
     if (!this.isOrganizer() && !this.isSpeaker()) return series;
 
-    try {
-      const res = await fetch(`/api/series/${code}/segments`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return series;
-      const data = await res.json();
-      const privileged: Segment[] = data.segments || [];
-      if (!privileged.length) return series;
+    const privileged = await this.fetchPrivilegedSegments(code, token);
+    if (!privileged?.length) return series;
 
-      const byId = new Map(privileged.map(s => [s.id, s]));
-      const merged = series.segments.map(seg => {
-        const full = byId.get(seg.id);
-        if (!full) return seg;
-        return {
-          ...seg,
-          adminToken: full.adminToken || seg.adminToken,
-          speakerEmail: full.speakerEmail ?? seg.speakerEmail,
-          speakerX: full.speakerX ?? seg.speakerX,
-          speakerLinkedIn: full.speakerLinkedIn ?? seg.speakerLinkedIn,
-          speakerWebsite: full.speakerWebsite ?? seg.speakerWebsite,
-          sessionDescription: full.sessionDescription ?? seg.sessionDescription,
-          topicSummary: full.topicSummary ?? seg.topicSummary,
-        };
-      });
-      return { ...series, segments: merged };
-    } catch {
-      return series;
-    }
+    const byId = new Map(privileged.map(s => [s.id, s]));
+    const merged = series.segments.map(seg => {
+      const full = byId.get(seg.id);
+      if (!full) return seg;
+      return {
+        ...seg,
+        adminToken: full.adminToken || seg.adminToken,
+        speakerEmail: full.speakerEmail ?? seg.speakerEmail,
+        speakerX: full.speakerX ?? seg.speakerX,
+        speakerLinkedIn: full.speakerLinkedIn ?? seg.speakerLinkedIn,
+        speakerWebsite: full.speakerWebsite ?? seg.speakerWebsite,
+        sessionDescription: full.sessionDescription ?? seg.sessionDescription,
+        topicSummary: full.topicSummary ?? seg.topicSummary,
+      };
+    });
+    return { ...series, segments: merged };
   }
 
   /**
@@ -1423,7 +1427,8 @@ export class QaService {
           speakerWebsite: seg.speakerWebsite || fs.speakerWebsite,
           sessionDescription: seg.sessionDescription || fs.sessionDescription,
           topicSummary: seg.topicSummary || fs.topicSummary,
-          adminToken: seg.adminToken || fs.adminToken,
+          // adminToken is intentionally absent from the public segment doc — see
+          // firestore-series.mapper.ts's FirestoreSegmentDoc comment.
           speaker: {
             ...(fs.speaker || {}),
             ...(seg.speaker || {}),
@@ -1537,18 +1542,33 @@ export class QaService {
     if (!code || !token) return null;
 
     const cached = this.currentSeries()?.segments?.find(s => s.id === segmentId)?.adminToken;
-    if (cached && cached !== 'undefined') return cached;
+    if (isValidToken(cached)) return cached;
 
-    try {
-      const res = await fetch(`/api/series/${code}/segments`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const seg = (data.segments || []).find((s: Segment) => s.id === segmentId);
-      return seg?.adminToken && seg.adminToken !== 'undefined' ? seg.adminToken : null;
-    } catch {
-      return null;
+    const privileged = await this.fetchPrivilegedSegments(code, token);
+    const seg = privileged?.find(s => s.id === segmentId);
+    return isValidToken(seg?.adminToken) ? seg.adminToken : null;
+  }
+
+  /** Resolve a segment's speaker admin token, copy its join link to the clipboard, and toast the result. */
+  public async copySpeakerLink(seg: Segment): Promise<void> {
+    const code = this.currentSeries()?.joinCode || this.currentSession()?.joinCode;
+    if (!code) return;
+
+    const adminToken = await this.resolveSpeakerAdminToken(seg.id);
+    if (!adminToken) {
+      this.showToast('Could not resolve speaker token. Re-authenticate as organizer and try again.');
+      return;
+    }
+
+    // Cache the resolved token in local series state so subsequent copies
+    // work even if a public poll has stripped it in the meantime.
+    this.patchSegmentInCurrentSeries(seg.id, s => ({ ...s, adminToken }));
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const url = `${origin}/?joinCode=${code}&token=${adminToken}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      this.showToast(`Speaker link copied for ${seg.speakerName}`);
     }
   }
 
@@ -1679,69 +1699,74 @@ export class QaService {
 
       if (!res.ok) throw new Error('Failed to update segment');
 
-      // Optimistically keep socials / session blurb in local series (poll may lag)
-      const before = this.currentSeries();
-      if (before?.segments) {
-        this.currentSeries.set({
-          ...before,
-          segments: before.segments.map(s =>
-            s.id === segmentId
-              ? {
-                  ...s,
-                  ...payload,
-                  speaker: {
-                    ...(s.speaker || { name: s.speakerName }),
-                    name: payload.speakerName || s.speakerName,
-                    title: payload.speakerRole ?? s.speakerRole,
-                    org: payload.speakerOrg ?? s.speakerOrg,
-                    bio: payload.speakerBio ?? s.speakerBio,
-                    xUrl: payload.speakerX ?? s.speakerX,
-                    linkedinUrl: payload.speakerLinkedIn ?? s.speakerLinkedIn,
-                    websiteUrl: payload.speakerWebsite ?? s.speakerWebsite,
-                  },
-                }
-              : s
-          ),
-        });
-      }
-
+      this.applyOptimisticSegmentPatch(segmentId, payload);
       this.showToast('Segment details saved successfully');
       await this.refreshSessionData(true);
-      // Re-apply payload after public poll strip/merge
-      const after = this.currentSeries();
-      if (after?.segments) {
-        const mergedSeries = {
-          ...after,
-          segments: after.segments.map(s =>
-            s.id === segmentId
-              ? {
-                  ...s,
-                  speakerEmail: payload.speakerEmail ?? s.speakerEmail,
-                  speakerX: payload.speakerX ?? s.speakerX,
-                  speakerLinkedIn: payload.speakerLinkedIn ?? s.speakerLinkedIn,
-                  speakerWebsite: payload.speakerWebsite ?? s.speakerWebsite,
-                  sessionDescription: payload.sessionDescription ?? s.sessionDescription,
-                  topicSummary: payload.topicSummary ?? s.topicSummary,
-                }
-              : s
-          ),
-        };
-        this.currentSeries.set(mergedSeries);
-        const seg = mergedSeries.segments.find(s => s.id === segmentId);
-        if (seg) {
-          const withToken = {
-            ...seg,
-            adminToken: seg.adminToken || (await this.resolveSpeakerAdminToken(segmentId)) || '',
-          };
-          void this.firebaseService.syncSegmentToFirestore(mergedSeries, withToken);
-        }
-      }
+      await this.reapplySegmentOverrides(segmentId, payload);
       return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error updating segment';
       this.errorMessage.set(msg);
       return false;
     }
+  }
+
+  private patchSegmentInCurrentSeries(
+    segmentId: string,
+    patch: (segment: Segment) => Segment
+  ): SessionSeries | null {
+    const series = this.currentSeries();
+    if (!series?.segments) return null;
+    const next: SessionSeries = {
+      ...series,
+      segments: series.segments.map(s => (s.id === segmentId ? patch(s) : s)),
+    };
+    this.currentSeries.set(next);
+    return next;
+  }
+
+  /** Keep socials / session blurb visible immediately, since the next poll may lag behind the PATCH. */
+  private applyOptimisticSegmentPatch(segmentId: string, payload: Partial<Segment>): void {
+    this.patchSegmentInCurrentSeries(segmentId, s => ({
+      ...s,
+      ...payload,
+      speaker: {
+        ...(s.speaker || { name: s.speakerName }),
+        name: payload.speakerName || s.speakerName,
+        title: payload.speakerRole ?? s.speakerRole,
+        org: payload.speakerOrg ?? s.speakerOrg,
+        bio: payload.speakerBio ?? s.speakerBio,
+        xUrl: payload.speakerX ?? s.speakerX,
+        linkedinUrl: payload.speakerLinkedIn ?? s.speakerLinkedIn,
+        websiteUrl: payload.speakerWebsite ?? s.speakerWebsite,
+      },
+    }));
+  }
+
+  /**
+   * The refresh right after a save re-fetches the public (sanitized) series,
+   * which can lag behind or drop fields the PATCH just set. Re-apply the same
+   * payload on top, then sync the result — with a resolved adminToken — to Firestore.
+   */
+  private async reapplySegmentOverrides(segmentId: string, payload: Partial<Segment>): Promise<void> {
+    const mergedSeries = this.patchSegmentInCurrentSeries(segmentId, s => ({
+      ...s,
+      speakerEmail: payload.speakerEmail ?? s.speakerEmail,
+      speakerX: payload.speakerX ?? s.speakerX,
+      speakerLinkedIn: payload.speakerLinkedIn ?? s.speakerLinkedIn,
+      speakerWebsite: payload.speakerWebsite ?? s.speakerWebsite,
+      sessionDescription: payload.sessionDescription ?? s.sessionDescription,
+      topicSummary: payload.topicSummary ?? s.topicSummary,
+    }));
+    if (!mergedSeries) return;
+
+    const seg = mergedSeries.segments.find(s => s.id === segmentId);
+    if (!seg) return;
+    const withToken = {
+      ...seg,
+      adminToken: seg.adminToken || (await this.resolveSpeakerAdminToken(segmentId)) || '',
+    };
+    void this.firebaseService.syncSegmentToFirestore(mergedSeries, withToken);
   }
 
   public async addSegment(payload: Partial<Segment>): Promise<boolean> {

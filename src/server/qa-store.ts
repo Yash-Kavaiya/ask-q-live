@@ -27,23 +27,14 @@ import {
   checkSemanticDeduplication,
   generateSeriesExecutiveReport,
   generatePostSessionReport,
+  isPlausibleApiKey,
 } from './gemini.service.js';
 
 import { timingSafeCompare } from './auth.js';
 
 function normalizeSeriesGeminiKey(raw?: string | null): string | undefined {
   const key = (raw || '').trim();
-  if (
-    !key ||
-    key.length < 10 ||
-    key === 'MY_GEMINI_API_KEY' ||
-    key === 'TODO' ||
-    key === 'undefined' ||
-    key === 'null'
-  ) {
-    return undefined;
-  }
-  return key;
+  return isPlausibleApiKey(key) ? key : undefined;
 }
 
 function normalizeEmail(raw?: string | null): string | undefined {

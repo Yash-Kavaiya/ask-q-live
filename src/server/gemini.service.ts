@@ -17,17 +17,19 @@ function resolveEnvGeminiKey(): string {
   return rawKey ? rawKey.trim() : '';
 }
 
+const MIN_PLAUSIBLE_API_KEY_LENGTH = 10;
+const PLACEHOLDER_API_KEYS = new Set(['MY_GEMINI_API_KEY', 'TODO', 'undefined', 'null']);
+
+/** True for a key that isn't empty, a known placeholder, or too short to be real. */
+export function isPlausibleApiKey(key: string | null | undefined): boolean {
+  const trimmed = (key || '').trim();
+  return trimmed.length >= MIN_PLAUSIBLE_API_KEY_LENGTH && !PLACEHOLDER_API_KEYS.has(trimmed);
+}
+
 /** Prefer host-provided key when valid; otherwise platform env key. */
 export function resolveGeminiApiKey(overrideKey?: string | null): string {
   const hostKey = (overrideKey || '').trim();
-  if (
-    hostKey &&
-    hostKey.length >= 10 &&
-    hostKey !== 'MY_GEMINI_API_KEY' &&
-    hostKey !== 'TODO' &&
-    hostKey !== 'undefined' &&
-    hostKey !== 'null'
-  ) {
+  if (isPlausibleApiKey(hostKey)) {
     return hostKey;
   }
   return resolveEnvGeminiKey();
@@ -36,8 +38,7 @@ export function resolveGeminiApiKey(overrideKey?: string | null): string {
 function getAiClient(overrideKey?: string | null): GoogleGenAI | null {
   const apiKey = resolveGeminiApiKey(overrideKey);
 
-  // Check for missing or placeholder API key
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey === 'TODO' || apiKey === 'undefined' || apiKey === 'null' || apiKey.length < 10) {
+  if (!isPlausibleApiKey(apiKey)) {
     return null;
   }
 

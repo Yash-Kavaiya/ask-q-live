@@ -236,7 +236,7 @@ import { Segment } from '../models/qa.models';
                     <button
                       [id]="'copy-speaker-link-' + seg.id"
                       type="button"
-                      (click)="copySpeakerLink(seg)"
+                      (click)="qaService.copySpeakerLink(seg)"
                       class="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
                       title="Copy unique speaker presenter link"
                     >
@@ -642,36 +642,6 @@ export class SeriesControlRoom {
     this.isSubmitting.set(true);
     await this.qaService.endSegment(segmentId);
     this.isSubmitting.set(false);
-  }
-
-  public async copySpeakerLink(seg: Segment): Promise<void> {
-    const code = this.qaService.currentSeries()?.joinCode || this.qaService.currentSession()?.joinCode;
-    if (!code) return;
-
-    const adminToken = await this.qaService.resolveSpeakerAdminToken(seg.id);
-    if (!adminToken) {
-      this.qaService.showToast('Could not resolve speaker token. Re-authenticate as organizer and try again.');
-      return;
-    }
-
-    // Keep token in local series state so subsequent copies work offline of poll wipe
-    const series = this.qaService.currentSeries();
-    if (series?.segments) {
-      this.qaService.currentSeries.set({
-        ...series,
-        segments: series.segments.map(s =>
-          s.id === seg.id ? { ...s, adminToken } : s
-        ),
-      });
-    }
-
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const url = `${origin}/?joinCode=${code}&token=${adminToken}`;
-
-    if (navigator.clipboard) {
-      await navigator.clipboard.writeText(url);
-      this.qaService.showToast(`Private Speaker Link copied for ${seg.speakerName}!`);
-    }
   }
 
   public openAddSegmentModal(): void {

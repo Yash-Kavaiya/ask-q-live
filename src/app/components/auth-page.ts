@@ -4,6 +4,7 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
+import { formatFirebaseAuthError } from '../services/firebase-auth-errors';
 import { UserRole } from '../models/qa.models';
 
 @Component({
@@ -335,7 +336,7 @@ export class AuthPage {
         this.errorMessage.set('Google sign-in did not complete. Please try again.');
       }
     } catch (err: unknown) {
-      this.errorMessage.set(this.formatAuthError(err, 'Google sign-in failed'));
+      this.errorMessage.set(formatFirebaseAuthError(err, 'Google sign-in failed'));
     } finally {
       this.isLoading.set(false);
     }
@@ -388,7 +389,7 @@ export class AuthPage {
         }
       }
     } catch (err: unknown) {
-      this.errorMessage.set(this.formatAuthError(err, 'Authentication failed. Please check credentials.'));
+      this.errorMessage.set(formatFirebaseAuthError(err, 'Authentication failed. Please check credentials.'));
     } finally {
       this.isLoading.set(false);
     }
@@ -413,36 +414,4 @@ export class AuthPage {
     this.qaService.navigateToHostStudio();
   }
 
-  private formatAuthError(err: unknown, fallback: string): string {
-    if (!(err instanceof Error)) return fallback;
-    const msg = err.message || fallback;
-    if (msg.includes('auth/email-already-in-use')) {
-      return 'An account with this email already exists. Try signing in instead.';
-    }
-    if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) {
-      return 'Incorrect email or password. Please try again.';
-    }
-    if (msg.includes('auth/weak-password')) {
-      return 'Password is too weak. Use at least 6 characters.';
-    }
-    if (msg.includes('auth/invalid-email')) {
-      return 'Please enter a valid email address.';
-    }
-    if (msg.includes('auth/popup-closed-by-user') || msg.includes('auth/cancelled-popup-request')) {
-      return 'Google sign-in was cancelled. Click Continue with Google again when ready.';
-    }
-    if (msg.includes('auth/popup-blocked')) {
-      return 'Pop-up blocked. Allow pop-ups for this site and try Google sign-in again.';
-    }
-    if (msg.includes('auth/unauthorized-domain')) {
-      return 'This domain is not authorized for Firebase Auth. Add it under Authentication → Settings → Authorized domains.';
-    }
-    if (msg.includes('auth/operation-not-allowed')) {
-      return 'Google sign-in is disabled in Firebase Console. Enable Authentication → Sign-in method → Google.';
-    }
-    if (msg.includes('auth/account-exists-with-different-credential')) {
-      return 'An account already exists with this email using a different sign-in method. Try email/password instead.';
-    }
-    return msg;
-  }
 }

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -970,7 +970,7 @@ export interface SegmentDraft {
     </div>
   `,
 })
-export class HostStudio {
+export class HostStudio implements OnInit {
   public qaService = inject(QaService);
   public firebaseService = inject(FirebaseService);
   private fb = inject(FormBuilder);
@@ -978,17 +978,6 @@ export class HostStudio {
   public showCreateModal = signal<boolean>(false);
   public modalMode = signal<'series' | 'single'>('series');
   public isSubmitting = signal<boolean>(false);
-
-  constructor() {
-    // When landing as speaker, load Gmail-matched invites into Speaker Studio.
-    if (this.qaService.userRole() === 'speaker') {
-      const email =
-        this.qaService.userEmail() || this.firebaseService.currentUser()?.email || '';
-      if (email) {
-        void this.qaService.fetchSpeakerInvites(email);
-      }
-    }
-  }
 
   public segments = signal<SegmentDraft[]>([
     {
@@ -1042,6 +1031,18 @@ export class HostStudio {
 
   private singleCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private seriesCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+  ngOnInit(): void {
+    // When landing as speaker, load Gmail-matched invites into Speaker Studio.
+    if (this.qaService.userRole() === 'speaker') {
+      const email = this.resolveSpeakerEmail();
+      if (email) {
+        this.qaService.fetchSpeakerInvites(email).catch(err =>
+          console.warn('Failed to load speaker invites:', err)
+        );
+      }
+    }
+  }
 
   public setSingleCodeMode(mode: 'auto' | 'custom'): void {
     this.singleCodeMode.set(mode);
@@ -1146,8 +1147,12 @@ export class HostStudio {
     return 'Staff Member';
   }
 
+  private resolveSpeakerEmail(): string {
+    return this.qaService.userEmail() || this.firebaseService.currentUser()?.email || '';
+  }
+
   public async refreshSpeakerInvites(): Promise<void> {
-    const email = this.qaService.userEmail() || this.firebaseService.currentUser()?.email || '';
+    const email = this.resolveSpeakerEmail();
     const invites = await this.qaService.fetchSpeakerInvites(email);
     if (invites.length === 0) {
       this.qaService.showToast('No invited talks found for this Gmail yet.');
