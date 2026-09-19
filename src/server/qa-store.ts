@@ -424,6 +424,7 @@ export class QaStore {
 
     this.series.set(seriesCode, newSeries);
     this.sessionQuestions.set(seriesCode, []);
+    this.repo.initParticipants(seriesCode);
     this.seriesParticipants.set(seriesCode, new Map());
     this.auditLogs.set(seriesCode, []);
 
@@ -1462,10 +1463,11 @@ export class QaStore {
     }
 
     // 2. Update legacy session participant
-    let p = this.repo.getParticipant(code, fingerprint);
-    if (!p) {
-      p = this.registerParticipant(code, fingerprint, name || 'Participant');
-    } else {
+    if (this.repo.hasParticipants(code)) {
+      let p = this.repo.getParticipant(code, fingerprint);
+      if (!p) {
+        p = this.registerParticipant(code, fingerprint, name || 'Participant');
+      }
       p.questionCount++;
       this.repo.setParticipant(code, fingerprint, p);
     }
@@ -2212,6 +2214,7 @@ export class QaStore {
 
     this.repo.setSession(joinCode, session);
     this.sessionQuestions.set(joinCode, []);
+    this.repo.initParticipants(joinCode);
 
     return session;
   }
@@ -2474,6 +2477,7 @@ export class QaStore {
 
     this.series.set(defaultCode, seriesNext26);
     this.sessionQuestions.set(defaultCode, []);
+    this.repo.initParticipants(defaultCode);
     this.seriesParticipants.set(defaultCode, new Map());
     this.auditLogs.set(defaultCode, []);
 
@@ -2814,6 +2818,7 @@ export class QaStore {
 
     this.series.set(nvidiaCode, seriesNvidia);
     this.sessionQuestions.set(nvidiaCode, []);
+    this.repo.initParticipants(nvidiaCode);
     this.seriesParticipants.set(nvidiaCode, new Map());
     this.auditLogs.set(nvidiaCode, []);
 
@@ -3111,6 +3116,7 @@ export class QaStore {
 
     this.series.set(gdgCode, seriesGdgLive);
     this.sessionQuestions.set(gdgCode, []);
+    this.repo.initParticipants(gdgCode);
     this.seriesParticipants.set(gdgCode, new Map());
     this.auditLogs.set(gdgCode, []);
 

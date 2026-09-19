@@ -41,4 +41,14 @@ export class QaRepository {
   countParticipants(joinCode: string): number {
     return this.participants.get(joinCode)?.size || 0;
   }
+
+  initParticipants(joinCode: string): void {
+    if (!this.participants.has(joinCode)) {
+      this.participants.set(joinCode, new Map());
+    }
+  }
+
+  hasParticipants(joinCode: string): boolean {
+    return this.participants.has(joinCode);
+  }
 }
