@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QaRepository } from './qa-repository.js';
-import type { Session, Participant, Series, SeriesParticipant, Question } from '../app/models/qa.models.js';
+import type { Session, Participant, Series, SeriesParticipant, Question, AuditEntry, PostSessionReport } from '../app/models/qa.models.js';
 
 describe('QaRepository: sessions & participants', () => {
   let repo: QaRepository;
@@ -201,5 +201,41 @@ describe('QaRepository: questions, sessionQuestions & upvoteLedger', () => {
     repo.addUpvote('q1', 'fp1');
     expect(repo.hasUpvote('q1', 'fp2')).toBe(false);
     expect(repo.hasUpvote('q2', 'fp1')).toBe(false);
+  });
+});
+
+describe('QaRepository: rate limits, audit logs & cached reports', () => {
+  let repo: QaRepository;
+
+  beforeEach(() => {
+    repo = new QaRepository();
+  });
+
+  it('stores and retrieves rate-limit timestamps by key', () => {
+    expect(repo.getRateLimitTimestamps('seg:q1')).toEqual([]);
+    repo.setRateLimitTimestamps('seg:q1', [1, 2, 3]);
+    expect(repo.getRateLimitTimestamps('seg:q1')).toEqual([1, 2, 3]);
+  });
+
+  it('lazily creates the audit log on first append and lists entries in insertion order', () => {
+    expect(repo.getAuditLog('NEXT26')).toEqual([]);
+    const e1 = { id: '1', action: 'SEGMENT_ADDED' } as AuditEntry;
+    const e2 = { id: '2', action: 'SEGMENT_STARTED' } as AuditEntry;
+    repo.appendAuditEntry('NEXT26', e1);
+    repo.appendAuditEntry('NEXT26', e2);
+    expect(repo.getAuditLog('NEXT26')).toEqual([e1, e2]);
+  });
+
+  it('does not create storage when an unknown audit log is read', () => {
+    const missing = repo.getAuditLog('GHOST');
+    missing.push({ id: 'x', action: 'SEGMENT_ADDED' } as AuditEntry);
+    expect(repo.getAuditLog('GHOST')).toEqual([]);
+  });
+
+  it('caches a post-session report per segment id', () => {
+    expect(repo.getCachedReport('seg-1')).toBeUndefined();
+    const report = { sessionTitle: 'Talk' } as PostSessionReport;
+    repo.setCachedReport('seg-1', report);
+    expect(repo.getCachedReport('seg-1')).toBe(report);
   });
 });

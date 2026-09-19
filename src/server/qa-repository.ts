@@ -1,4 +1,4 @@
-import { Session, Participant, Series, SeriesParticipant, Question } from '../app/models/qa.models.js';
+import { Session, Participant, Series, SeriesParticipant, Question, AuditEntry, PostSessionReport } from '../app/models/qa.models.js';
 
 export class QaRepository {
   private sessions = new Map<string, Session>();
@@ -8,6 +8,9 @@ export class QaRepository {
   private questions = new Map<string, Question>(); // questionId -> Question
   private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
   private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
+  private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
+  private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
+  private cachedSegmentReports = new Map<string, PostSessionReport>(); // segmentId -> PostSessionReport
 
   getSession(joinCode: string): Session | undefined {
     return this.sessions.get(joinCode);
@@ -148,5 +151,34 @@ export class QaRepository {
 
   removeUpvote(questionId: string, fingerprint: string): void {
     this.upvoteLedger.delete(this.upvoteKey(questionId, fingerprint));
+  }
+
+  getRateLimitTimestamps(key: string): number[] {
+    return this.submissionRateLimits.get(key) || [];
+  }
+
+  setRateLimitTimestamps(key: string, timestamps: number[]): void {
+    this.submissionRateLimits.set(key, timestamps);
+  }
+
+  getAuditLog(seriesCode: string): AuditEntry[] {
+    return this.auditLogs.get(seriesCode) || [];
+  }
+
+  appendAuditEntry(seriesCode: string, entry: AuditEntry): void {
+    const log = this.auditLogs.get(seriesCode);
+    if (log) {
+      log.push(entry);
+    } else {
+      this.auditLogs.set(seriesCode, [entry]);
+    }
+  }
+
+  getCachedReport(segmentId: string): PostSessionReport | undefined {
+    return this.cachedSegmentReports.get(segmentId);
+  }
+
+  setCachedReport(segmentId: string, report: PostSessionReport): void {
+    this.cachedSegmentReports.set(segmentId, report);
   }
 }

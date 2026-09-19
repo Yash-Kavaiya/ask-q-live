@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QaStore } from './qa-store.js';
 import { timingSafeCompare, resolveAuth, sanitizeSeriesForPublic } from './auth.js';
 import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag, generatePostSessionReport } from './gemini.service.js';
@@ -782,6 +782,144 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       expect(store.getSession('COLL-S1')?.title).toBe('Only Talk');
       expect(store.getQuestions('COLL-S1')).toEqual([]);
     }, 15000);
+  });
+
+  describe('9. Audit Logs, Rate-Limit Windows & Cached Segment Reports', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const submit = (joinCode: string, fingerprint: string, content: string, segmentId?: string) =>
+      store.submitQuestion({
+        joinCode,
+        clientFingerprint: fingerprint,
+        authorName: 'Window Tester',
+        isAnonymous: false,
+        content,
+        segmentId,
+      });
+
+    it('should accumulate audit entries per series in insertion order, isolated between series, and case-insensitive on lookup', () => {
+      const next26 = store.getSeries('NEXT26')!;
+      const other = store.createSeries({ title: 'Audit Neighbour' });
+
+      expect(store.getAuditLog('NEXT26')).toEqual([]);
+
+      const first = store.logAudit({ seriesId: next26.id, actorRole: 'organizer', actorRef: 'organizer', action: 'FIRST_ACTION', targetId: next26.id });
+      const second = store.logAudit({ seriesId: next26.id, actorRole: 'organizer', actorRef: 'organizer', action: 'SECOND_ACTION', targetId: next26.id });
+
+      expect(first.id).toMatch(/^audit-/);
+      expect(first.createdAt).toBeTruthy();
+      expect(store.getAuditLog('NEXT26')).toEqual([first, second]);
+      expect(store.getAuditLog('next26').map(a => a.action)).toEqual(['FIRST_ACTION', 'SECOND_ACTION']);
+      expect(store.getAuditLog(other.seriesCode).map(a => a.action)).toEqual(['SERIES_CREATED']);
+    });
+
+    it('should start a created series audit trail with SERIES_CREATED and append later actions after it', () => {
+      const series = store.createSeries({ title: 'Audit Trail Workshop' });
+      expect(store.getAuditLog(series.seriesCode).map(a => a.action)).toEqual(['SERIES_CREATED']);
+
+      store.addSegment(series.seriesCode, { title: 'Late Talk', speakerName: 'Late Speaker' }, series.organizerToken);
+      expect(store.getAuditLog(series.seriesCode).map(a => a.action)).toEqual(['SERIES_CREATED', 'SEGMENT_ADDED']);
+    });
+
+    it('should return [] for an unknown code without creating storage, and lazily store audit entries logged for an unknown series id', () => {
+      const missing = store.getAuditLog('NOPE99');
+      expect(missing).toEqual([]);
+      missing.push({ id: 'stray', seriesId: 'NOPE99', actorRole: 'organizer', actorRef: 'x', action: 'STRAY', createdAt: '' });
+      expect(store.getAuditLog('NOPE99')).toEqual([]);
+
+      // No series has id 'GHOST77', so the entry is filed under the raw seriesId with no prior initialisation.
+      const entry = store.logAudit({ seriesId: 'GHOST77', actorRole: 'organizer', actorRef: 'x', action: 'ORPHAN_ACTION' });
+      expect(store.getAuditLog('GHOST77')).toEqual([entry]);
+    });
+
+    it('should release the per-segment velocity limit only after the 60s window, per fingerprint and per segment', async () => {
+      const t0 = Date.parse('2030-01-01T00:00:00.000Z');
+      vi.setSystemTime(t0);
+      const fp = 'window-fp';
+
+      for (let i = 0; i < 5; i++) {
+        const res = await submit('NEXT26', fp, `Window question number ${i + 1} about kernel scheduling`, 'seg-1');
+        expect(res.error).toBeUndefined();
+      }
+      const blocked = await submit('NEXT26', fp, 'Window question that should be blocked by velocity', 'seg-1');
+      expect(blocked.error).toContain('velocity limit reached');
+
+      // A different fingerprint and a different segment each have their own counter
+      expect((await submit('NEXT26', 'other-fp', 'Independent visitor asking about kernel scheduling', 'seg-1')).error).toBeUndefined();
+      expect((await submit('NEXT26', fp, 'Same visitor asking the second speaker about pricing', 'seg-2')).error).toBeUndefined();
+
+      vi.setSystemTime(t0 + 59_999);
+      expect((await submit('NEXT26', fp, 'Still inside the window asking about caching', 'seg-1')).error).toContain('velocity limit reached');
+
+      vi.setSystemTime(t0 + 60_000);
+      const released = await submit('NEXT26', fp, 'Window has now elapsed so this one goes through', 'seg-1');
+      expect(released.error).toBeUndefined();
+      expect(released.question).toBeDefined();
+    }, 30000);
+
+    it('should enforce the per-series hourly limit independently of the 60s window and release it after an hour', async () => {
+      const series = store.createSeries({
+        title: 'Hourly Limit Workshop',
+        settings: { maxQuestionsPerMinute: 2, maxQuestionsPerSeriesPerHour: 3 },
+      });
+      const code = series.seriesCode;
+      const fp = 'hourly-fp';
+      const t0 = Date.parse('2030-01-01T00:00:00.000Z');
+      vi.setSystemTime(t0);
+
+      expect((await submit(code, fp, 'Hourly question one about database sharding')).error).toBeUndefined();
+      expect((await submit(code, fp, 'Hourly question two about network partitions')).error).toBeUndefined();
+      expect((await submit(code, fp, 'Hourly question three about consensus protocols')).error).toContain('velocity limit reached');
+
+      // 61s later the per-minute window has released; this takes the hourly count to 3
+      vi.setSystemTime(t0 + 61_000);
+      expect((await submit(code, fp, 'Hourly question three about consensus protocols')).error).toBeUndefined();
+
+      // Per-minute has room again but the hourly cap (3/hr) is now reached
+      vi.setSystemTime(t0 + 122_000);
+      expect((await submit(code, fp, 'Hourly question four about observability stacks')).error).toContain('Event-level submission limit exceeded (3/hr)');
+
+      // Once the first two submissions age out (one hour after t0) only one remains inside the window
+      vi.setSystemTime(t0 + 3_600_000);
+      expect((await submit(code, fp, 'Hourly question four about observability stacks')).error).toBeUndefined();
+    }, 30000);
+
+    it('should reuse a segment report until the segment gains questions, then regenerate only that segment', async () => {
+      const series = store.createSeries({
+        title: 'Report Cache Workshop',
+        segments: [
+          { id: 'cache-seg-a', title: 'Cache Talk A', speakerName: 'Speaker A', type: 'TALK' },
+          { id: 'cache-seg-b', title: 'Cache Talk B', speakerName: 'Speaker B', type: 'TALK' },
+        ],
+      });
+      const code = series.seriesCode;
+      const t1 = Date.parse('2031-01-01T00:00:00.000Z');
+      vi.setSystemTime(t1);
+
+      expect((await submit(code, 'report-fp', 'Report question for talk A on vector search', 'cache-seg-a')).error).toBeUndefined();
+      expect((await submit(code, 'report-fp', 'Report question for talk B on stream processing', 'cache-seg-b')).error).toBeUndefined();
+
+      const first = await store.getSeriesReport(code);
+      expect(first!.segmentReports!.map(r => r.totalQuestions)).toEqual([1, 1]);
+      expect(first!.segmentReports!.map(r => r.generatedAt)).toEqual([new Date(t1).toISOString(), new Date(t1).toISOString()]);
+
+      // Same question counts a minute later: segment reports come from the cache, the series report is rebuilt
+      const t2 = t1 + 60_000;
+      vi.setSystemTime(t2);
+      const second = await store.getSeriesReport(code);
+      expect(second?.generatedAt).toBe(new Date(t2).toISOString());
+      expect(second!.segmentReports!.map(r => r.generatedAt)).toEqual([new Date(t1).toISOString(), new Date(t1).toISOString()]);
+
+      // Talk A gains a question: only its report is regenerated
+      expect((await submit(code, 'report-fp-2', 'Second report question for talk A on embeddings', 'cache-seg-a')).error).toBeUndefined();
+      const t3 = t2 + 60_000;
+      vi.setSystemTime(t3);
+      const third = await store.getSeriesReport(code);
+      expect(third!.segmentReports!.map(r => r.totalQuestions)).toEqual([2, 1]);
+      expect(third!.segmentReports!.map(r => r.generatedAt)).toEqual([new Date(t3).toISOString(), new Date(t1).toISOString()]);
+    }, 30000);
   });
 
   describe('Phase P1: Single-Session Executive Report Accuracy', () => {

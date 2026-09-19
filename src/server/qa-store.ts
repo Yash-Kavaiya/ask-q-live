@@ -107,9 +107,6 @@ const UNAMBIGUOUS_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export class QaStore {
   private repo = new QaRepository();
-  private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
-  private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
-  private cachedSegmentReports = new Map<string, PostSessionReport>(); // segmentId -> PostSessionReport
 
   constructor(seed = false) {
     if (seed) {
@@ -421,7 +418,6 @@ export class QaStore {
     this.repo.setSeries(seriesCode, newSeries);
     this.repo.initParticipants(seriesCode);
     this.repo.initSeriesParticipants(seriesCode);
-    this.auditLogs.set(seriesCode, []);
 
     // Create synthetic root session for legacy join
     const rootSession: Session = {
@@ -1170,7 +1166,7 @@ export class QaStore {
     const seriesKey = `${code}:hourly:${params.clientFingerprint}`;
 
     // 1. Prune and check segment rate limit
-    const segTimestamps = (this.submissionRateLimits.get(segmentKey) || []).filter(t => now - t < 60000);
+    const segTimestamps = this.repo.getRateLimitTimestamps(segmentKey).filter(t => now - t < 60000);
     const maxPerMin = targetSegment?.moderationSensitivity ? 5 : (session?.settings.maxQuestionsPerMinute || series?.settings.maxQuestionsPerMinute || 5);
     if (segTimestamps.length >= maxPerMin) {
       return {
@@ -1180,7 +1176,7 @@ export class QaStore {
     }
 
     // 2. Prune and check series hourly rate limit
-    const seriesTimestamps = (this.submissionRateLimits.get(seriesKey) || []).filter(t => now - t < 3600000);
+    const seriesTimestamps = this.repo.getRateLimitTimestamps(seriesKey).filter(t => now - t < 3600000);
     const maxPerHour = series?.settings.maxQuestionsPerSeriesPerHour || 30;
     if (seriesTimestamps.length >= maxPerHour) {
       return {
@@ -1191,8 +1187,8 @@ export class QaStore {
 
     segTimestamps.push(now);
     seriesTimestamps.push(now);
-    this.submissionRateLimits.set(segmentKey, segTimestamps);
-    this.submissionRateLimits.set(seriesKey, seriesTimestamps);
+    this.repo.setRateLimitTimestamps(segmentKey, segTimestamps);
+    this.repo.setRateLimitTimestamps(seriesKey, seriesTimestamps);
 
     // Automated Moderation via Gemini
     const modSensitivity = targetSegment?.moderationSensitivity || session?.settings.moderationSensitivity || 'BALANCED';
@@ -1530,15 +1526,12 @@ export class QaStore {
     const series = this.repo.listSeries().find(s => s.id === entry.seriesId);
     const code = series?.seriesCode || entry.seriesId;
 
-    if (!this.auditLogs.has(code)) {
-      this.auditLogs.set(code, []);
-    }
-    this.auditLogs.get(code)!.push(fullEntry);
+    this.repo.appendAuditEntry(code, fullEntry);
     return fullEntry;
   }
 
   public getAuditLog(seriesCode: string): AuditEntry[] {
-    return this.auditLogs.get(seriesCode.toUpperCase()) || [];
+    return this.repo.getAuditLog(seriesCode.toUpperCase());
   }
 
   // ==========================================
@@ -2035,7 +2028,7 @@ export class QaStore {
       if (seg.id === 'general') continue; // Skip general bucket in individual speaker breakdown
       const segQuestions = allQuestions.filter(q => q.segmentId === seg.id);
 
-      let segReport = this.cachedSegmentReports.get(seg.id);
+      let segReport = this.repo.getCachedReport(seg.id);
       if (!segReport || segQuestions.length > segReport.totalQuestions) {
         const generated = await generatePostSessionReport(
           `${seg.speakerName} — ${seg.title}`,
@@ -2053,7 +2046,7 @@ export class QaStore {
           actionableFollowUps: generated.actionableFollowUps,
           markdownReport: generated.markdownReport,
         };
-        this.cachedSegmentReports.set(seg.id, segReport);
+        this.repo.setCachedReport(seg.id, segReport);
       }
       if (segReport) {
         segmentReports.push(segReport);
@@ -2467,7 +2460,6 @@ export class QaStore {
     this.repo.setSeries(defaultCode, seriesNext26);
     this.repo.initParticipants(defaultCode);
     this.repo.initSeriesParticipants(defaultCode);
-    this.auditLogs.set(defaultCode, []);
 
     // Seed keynote root session for standalone backward compatibility
     const keynoteSession: Session = {
@@ -2806,7 +2798,6 @@ export class QaStore {
     this.repo.setSeries(nvidiaCode, seriesNvidia);
     this.repo.initParticipants(nvidiaCode);
     this.repo.initSeriesParticipants(nvidiaCode);
-    this.auditLogs.set(nvidiaCode, []);
 
     const keynoteNvidiaSession: Session = {
       id: 'session-nvidia',
@@ -3102,7 +3093,6 @@ export class QaStore {
     this.repo.setSeries(gdgCode, seriesGdgLive);
     this.repo.initParticipants(gdgCode);
     this.repo.initSeriesParticipants(gdgCode);
-    this.auditLogs.set(gdgCode, []);
 
     const keynoteGdgSession: Session = {
       id: 'session-gdglive',
