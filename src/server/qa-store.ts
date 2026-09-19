@@ -3562,5 +3562,3 @@ function newQuestionLine(q: Question, aiResult: { firstLine: string; secondLine:
   q.aiStatus = 'READY';
   q.updatedAt = new Date().toISOString();
 }
-
-export const qaStore = new QaStore(false);

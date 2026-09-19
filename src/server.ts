@@ -6,7 +6,7 @@ import {
 } from '@angular/ssr/node';
 import express from 'express';
 import { join } from 'node:path';
-import { qaStore } from './server/qa-store.js';
+import { QaStore } from './server/qa-store.js';
 import { computeSessionMetrics } from './server/report-metrics.js';
 import {
   translateContent,
@@ -32,6 +32,7 @@ try {
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
+const qaStore = new QaStore(false);
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: [
     'localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0',
