@@ -278,18 +278,33 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       expect(participant?.questionCount).toBe(1);
     });
 
-    it('should NOT register participants for backing session codes (e.g., NEXT26-S1) that have no initialized participant map', () => {
-      // NEXT26-S1 is a backing session that was created but has no participant map initialized
-      // Submitting a question should NOT create a participant record for it
+    it('should NOT register participants for backing session codes (e.g., NEXT26-S1) when question submitted without initialized participant map', async () => {
+      // NEXT26-S1 is a backing session that was created via repo.setSession but has no participant map initialized
+      // The hasParticipants guard in recordParticipantQuestion should prevent participant registration
       const backingCode = 'NEXT26-S1';
-      const participantsBeforeSubmit = store.getParticipants(backingCode);
-      expect(participantsBeforeSubmit.length).toBe(0);
 
-      // The submitQuestion call may or may not work for backing sessions (depends on the code path),
-      // but if it does, it should NOT update participants for backing sessions
-      // since those codes don't have initialized participant maps
-      const participantsAfterCheck = store.getParticipants(backingCode);
-      expect(participantsAfterCheck.length).toBe(0);
+      // Verify backing session exists but has no participants initialized
+      expect(store.getSession(backingCode)).toBeDefined();
+      expect(store.getParticipants(backingCode).length).toBe(0);
+
+      // Submit a question under the backing session code
+      const res = await store.submitQuestion({
+        joinCode: backingCode,
+        clientFingerprint: 'fp-backing-test',
+        authorName: 'Test User',
+        isAnonymous: false,
+        content: 'Test question on backing session',
+      });
+
+      // The question may be submitted, but the guard should prevent participant registration
+      // since the backing session code has no initialized participant map
+      const participantsAfterSubmit = store.getParticipants(backingCode);
+      expect(participantsAfterSubmit.length).toBe(0);
+
+      // Verify the question count on the backing session reflects the guard worked
+      const questions = store.getQuestions(backingCode);
+      expect(questions.length).toBeGreaterThan(0); // question was submitted
+      // but participants map was never created/updated due to the guard
     });
   });
 
