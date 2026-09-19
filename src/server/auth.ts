@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import type { UserRole, UserAccessInfo, Series } from '../app/models/qa.models.js';
+import type { UserRole, UserAccessInfo, Series, Segment } from '../app/models/qa.models.js';
 import type { QaStore } from './qa-store.js';
 
 /**
@@ -122,6 +122,22 @@ export function sanitizeSeriesForPublic(
     ...safeSeries,
     segments: sanitizedSegments,
   };
+}
+
+/**
+ * Per-segment sanitizer: the organizer or the segment's own assigned speaker
+ * may see its adminToken/speakerEmail; everyone else gets the safe subset.
+ */
+export function sanitizeSegmentForRole(
+  seg: Segment,
+  auth: UserAccessInfo
+): Segment | Omit<Segment, 'adminToken' | 'speakerEmail'> {
+  if (auth.role === 'organizer' || (auth.role === 'speaker' && auth.scope.includes(seg.id))) {
+    return seg;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { adminToken, speakerEmail, ...safe } = seg;
+  return safe;
 }
 
 /**

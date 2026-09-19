@@ -6,18 +6,18 @@ import {
 } from '@angular/ssr/node';
 import express from 'express';
 import { join } from 'node:path';
-import { qaStore } from './server/qa-store.js';
+import { QaStore } from './server/qa-store.js';
 import { computeSessionMetrics } from './server/report-metrics.js';
 import {
   translateContent,
   generatePostSessionReport,
   extractDocumentText,
-  isPlausibleApiKey,
 } from './server/gemini.service.js';
 import {
   requireAuth,
   resolveAuth,
   sanitizeSeriesForPublic,
+  sanitizeSegmentForRole,
   extractBearerToken,
 } from './server/auth.js';
 import type { Series } from './app/models/qa.models.js';
@@ -33,6 +33,7 @@ try {
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
+const qaStore = new QaStore(false);
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: [
     'localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0',
@@ -163,44 +164,13 @@ app.get('/api/speaker/invites', (req, res) => {
 // 1c. Patch Series (Organizer only)
 app.patch('/api/series/:code', requireAuth(qaStore, ['organizer']), (req, res) => {
   const code = getCode(req);
-  const series = qaStore.getSeries(code);
-  if (!series) {
-    res.status(404).json({ error: 'Series not found' });
+  const token = extractBearerToken(req);
+  const result = qaStore.updateSeriesMetadata(code, req.body, token);
+  if (!result.success) {
+    res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  const { title, description, contextData, seriesContextData, settings, state, geminiApiKey } = req.body;
-  if (title) series.title = title;
-  if (description !== undefined) series.description = description;
-  if (contextData !== undefined) {
-    series.contextData = contextData;
-    series.seriesContextData = contextData;
-  }
-  if (seriesContextData !== undefined) {
-    series.seriesContextData = seriesContextData;
-    series.contextData = seriesContextData;
-  }
-  if (settings) {
-    series.settings = { ...series.settings, ...settings };
-  }
-  if (state) {
-    series.state = state;
-  }
-  if (geminiApiKey !== undefined) {
-    const key = typeof geminiApiKey === 'string' ? geminiApiKey.trim() : '';
-    series.geminiApiKey = isPlausibleApiKey(key) ? key : undefined;
-  }
-  series.revision = (series.revision || 1) + 1;
-  series.updatedAt = new Date().toISOString();
-
-  qaStore.logAudit({
-    seriesId: series.id,
-    actorRole: 'organizer',
-    actorRef: 'organizer',
-    action: 'SERIES_UPDATED',
-    targetId: series.id,
-  });
-
-  res.json({ success: true, series: sanitizeSeriesForPublic(series) });
+  res.json({ success: true, series: sanitizeSeriesForPublic(result.series!) });
 });
 
 // 1d. Join Series (Attendee entry point)
@@ -259,60 +229,26 @@ app.post(['/api/series/:code/claim', '/api/series/:code/auth', '/api/sessions/:c
 // 1f. Update Series Grounding Context (Organizer)
 app.post('/api/series/:code/grounding', requireAuth(qaStore, ['organizer']), (req, res) => {
   const code = getCode(req);
+  const token = extractBearerToken(req);
   const { contextData } = req.body;
-  const series = qaStore.getSeries(code);
-  if (!series) {
-    res.status(404).json({ error: 'Series not found' });
+  const result = qaStore.updateSeriesGrounding(code, contextData, token);
+  if (!result.success) {
+    res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  series.contextData = contextData || '';
-  series.seriesContextData = contextData || '';
-  series.revision = (series.revision || 1) + 1;
-  series.updatedAt = new Date().toISOString();
-
-  qaStore.logAudit({
-    seriesId: series.id,
-    actorRole: 'organizer',
-    actorRef: 'organizer',
-    action: 'SERIES_GROUNDING_UPDATED',
-    targetId: series.id,
-  });
-
   res.json({ success: true, message: 'Series grounding updated successfully' });
 });
 
 // 1g. End Entire Series (Organizer)
 app.post('/api/series/:code/end', requireAuth(qaStore, ['organizer']), (req, res) => {
   const code = getCode(req);
-  const series = qaStore.getSeries(code);
-  if (!series) {
-    res.status(404).json({ error: 'Series not found' });
+  const token = extractBearerToken(req);
+  const result = qaStore.endSeries(code, token);
+  if (!result.success) {
+    res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  series.state = 'ENDED';
-  const nowIso = new Date().toISOString();
-  series.segments.forEach(seg => {
-    if (seg.state === 'LIVE' || seg.state === 'PAUSED' || seg.status === 'LIVE' || seg.status === 'PAUSED') {
-      seg.state = 'ENDED';
-      seg.status = 'ENDED';
-      seg.actualEnd = nowIso;
-      seg.actualEndTime = nowIso;
-    }
-  });
-  series.liveSegmentId = null;
-  series.activeSegmentId = null;
-  series.revision = (series.revision || 1) + 1;
-  series.updatedAt = nowIso;
-
-  qaStore.logAudit({
-    seriesId: series.id,
-    actorRole: 'organizer',
-    actorRef: 'organizer',
-    action: 'SERIES_ENDED',
-    targetId: series.id,
-  });
-
-  res.json({ success: true, series: sanitizeSeriesForPublic(series) });
+  res.json({ success: true, series: sanitizeSeriesForPublic(result.series!) });
 });
 
 // 1h. Duplicate Series (Organizer)
@@ -405,15 +341,7 @@ app.get('/api/series/:code/segments', (req, res) => {
   const token = extractBearerToken(req);
   const auth = resolveAuth(qaStore, code, token);
 
-  const segments = series.segments.map(seg => {
-    // If organizer, or speaker of this segment, allow adminToken; otherwise strip it
-    if (auth.role === 'organizer' || (auth.role === 'speaker' && auth.scope.includes(seg.id))) {
-      return seg;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { adminToken, speakerEmail, ...safe } = seg;
-    return safe;
-  });
+  const segments = series.segments.map(seg => sanitizeSegmentForRole(seg, auth));
 
   res.json({ segments });
 });
@@ -434,87 +362,13 @@ app.post('/api/series/:code/segments', requireAuth(qaStore, ['organizer']), (req
 app.patch('/api/series/:code/segments/:id', requireAuth(qaStore, ['organizer', 'speaker']), (req, res) => {
   const code = getCode(req);
   const id = getParam(req, 'id');
-  const series = qaStore.getSeries(code);
-  if (!series) {
-    res.status(404).json({ error: 'Series not found' });
+  const token = extractBearerToken(req);
+  const result = qaStore.updateSegmentProfile(code, id, req.body, token);
+  if (!result.success) {
+    res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  const seg = series.segments.find(s => s.id === id);
-  if (!seg) {
-    res.status(404).json({ error: 'Segment not found' });
-    return;
-  }
-
-  const {
-    title,
-    speakerName,
-    speakerBio,
-    speakerRole,
-    speakerAvatar,
-    speakerEmail,
-    speakerOrg,
-    speakerX,
-    speakerLinkedIn,
-    speakerWebsite,
-    topicSummary,
-    sessionDescription,
-    groundingContext,
-    contextData,
-    categories,
-    durationMinutes,
-  } = req.body;
-  if (title) seg.title = title;
-  if (speakerName) seg.speakerName = speakerName;
-  if (speakerBio !== undefined) seg.speakerBio = speakerBio;
-  if (speakerRole !== undefined) seg.speakerRole = speakerRole;
-  if (speakerAvatar !== undefined) seg.speakerAvatar = speakerAvatar;
-  if (speakerOrg !== undefined) seg.speakerOrg = speakerOrg;
-  if (topicSummary !== undefined) seg.topicSummary = topicSummary;
-  if (sessionDescription !== undefined) {
-    const desc = String(sessionDescription || '').trim();
-    seg.sessionDescription = desc || undefined;
-    // Keep topicSummary in sync when host edits the public session blurb
-    if (desc) seg.topicSummary = desc;
-  }
-  if (speakerEmail !== undefined) {
-    const email = String(speakerEmail || '').trim().toLowerCase();
-    seg.speakerEmail = email && email.includes('@') ? email : undefined;
-  }
-  if (speakerX !== undefined) {
-    seg.speakerX = String(speakerX || '').trim() || undefined;
-  }
-  if (speakerLinkedIn !== undefined) {
-    seg.speakerLinkedIn = String(speakerLinkedIn || '').trim() || undefined;
-  }
-  if (speakerWebsite !== undefined) {
-    seg.speakerWebsite = String(speakerWebsite || '').trim() || undefined;
-  }
-  // Keep nested speaker profile socials aligned
-  if (seg.speaker) {
-    if (speakerX !== undefined) seg.speaker.xUrl = seg.speakerX;
-    if (speakerLinkedIn !== undefined) seg.speaker.linkedinUrl = seg.speakerLinkedIn;
-    if (speakerWebsite !== undefined) seg.speaker.websiteUrl = seg.speakerWebsite;
-    if (speakerBio !== undefined) seg.speaker.bio = seg.speakerBio;
-    if (speakerOrg !== undefined) seg.speaker.org = seg.speakerOrg;
-  }
-  if (groundingContext !== undefined) {
-    seg.groundingContext = groundingContext;
-    seg.contextData = groundingContext;
-  }
-  if (contextData !== undefined) {
-    seg.contextData = contextData;
-    seg.groundingContext = contextData;
-  }
-  if (categories && Array.isArray(categories)) seg.categories = categories;
-  if (durationMinutes) {
-    seg.durationMinutes = durationMinutes;
-    seg.scheduledDurationMinutes = durationMinutes;
-  }
-
-  series.revision = (series.revision || 1) + 1;
-  series.updatedAt = new Date().toISOString();
-
-  res.json({ success: true, segment: seg });
+  res.json({ success: true, segment: result.segment });
 });
 
 // 2d. Delete Segment (Organizer)
@@ -613,23 +467,14 @@ app.post('/api/series/:code/segments/:id/extend', requireAuth(qaStore, ['organiz
 app.post('/api/series/:code/segments/:id/grounding', requireAuth(qaStore, ['organizer', 'speaker']), (req, res) => {
   const code = getCode(req);
   const id = getParam(req, 'id');
+  const token = extractBearerToken(req);
   const { groundingContext } = req.body;
-  const series = qaStore.getSeries(code);
-  if (!series) {
-    res.status(404).json({ error: 'Series not found' });
+  const result = qaStore.updateSegmentGrounding(code, id, groundingContext, token);
+  if (!result.success) {
+    res.status(result.status || 400).json({ error: result.error });
     return;
   }
-  const seg = series.segments.find(s => s.id === id);
-  if (!seg) {
-    res.status(404).json({ error: 'Segment not found' });
-    return;
-  }
-  seg.groundingContext = groundingContext || '';
-  seg.contextData = groundingContext || '';
-  series.revision = (series.revision || 1) + 1;
-  series.updatedAt = new Date().toISOString();
-
-  res.json({ success: true, segment: seg });
+  res.json({ success: true, segment: result.segment });
 });
 
 // ----------------------------------------------------------------------------
