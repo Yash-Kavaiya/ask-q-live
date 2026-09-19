@@ -1,8 +1,10 @@
-import { Session, Participant } from '../app/models/qa.models.js';
+import { Session, Participant, Series, SeriesParticipant } from '../app/models/qa.models.js';
 
 export class QaRepository {
   private sessions = new Map<string, Session>();
   private participants = new Map<string, Map<string, Participant>>();
+  private series = new Map<string, Series>();
+  private seriesParticipants = new Map<string, Map<string, SeriesParticipant>>();
 
   getSession(joinCode: string): Session | undefined {
     return this.sessions.get(joinCode);
@@ -50,5 +52,53 @@ export class QaRepository {
 
   hasParticipants(joinCode: string): boolean {
     return this.participants.has(joinCode);
+  }
+
+  getSeries(code: string): Series | undefined {
+    return this.series.get(code);
+  }
+
+  setSeries(code: string, series: Series): void {
+    this.series.set(code, series);
+  }
+
+  hasSeries(code: string): boolean {
+    return this.series.has(code);
+  }
+
+  listSeries(): Series[] {
+    return Array.from(this.series.values());
+  }
+
+  getSeriesParticipant(seriesCode: string, fingerprint: string): SeriesParticipant | undefined {
+    return this.seriesParticipants.get(seriesCode)?.get(fingerprint);
+  }
+
+  setSeriesParticipant(seriesCode: string, fingerprint: string, participant: SeriesParticipant): void {
+    let map = this.seriesParticipants.get(seriesCode);
+    if (!map) {
+      map = new Map();
+      this.seriesParticipants.set(seriesCode, map);
+    }
+    map.set(fingerprint, participant);
+  }
+
+  listSeriesParticipants(seriesCode: string): SeriesParticipant[] {
+    const map = this.seriesParticipants.get(seriesCode);
+    return map ? Array.from(map.values()) : [];
+  }
+
+  countSeriesParticipants(seriesCode: string): number {
+    return this.seriesParticipants.get(seriesCode)?.size || 0;
+  }
+
+  initSeriesParticipants(seriesCode: string): void {
+    if (!this.seriesParticipants.has(seriesCode)) {
+      this.seriesParticipants.set(seriesCode, new Map());
+    }
+  }
+
+  hasSeriesParticipants(seriesCode: string): boolean {
+    return this.seriesParticipants.has(seriesCode);
   }
 }

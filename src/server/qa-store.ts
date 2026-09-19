@@ -107,11 +107,9 @@ const UNAMBIGUOUS_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export class QaStore {
   private repo = new QaRepository();
-  private series = new Map<string, Series>(); // seriesCode -> Series
   private questions = new Map<string, Question>(); // questionId -> Question
   private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
   private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
-  private seriesParticipants = new Map<string, Map<string, SeriesParticipant>>(); // seriesCode -> (fingerprint -> SeriesParticipant)
   private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
   private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
   private cachedSegmentReports = new Map<string, PostSessionReport>(); // segmentId -> PostSessionReport
@@ -125,7 +123,7 @@ export class QaStore {
   public isCodeAvailable(code: string): boolean {
     const clean = code.toUpperCase().trim().replace(/[^A-Z0-9_-]/g, '');
     if (!clean || clean.length < 3) return false;
-    return !this.repo.hasSession(clean) && !this.series.has(clean);
+    return !this.repo.hasSession(clean) && !this.repo.hasSeries(clean);
   }
 
   /**
@@ -144,7 +142,7 @@ export class QaStore {
         code = (prefix + code).substring(0, 12);
       }
       attempts++;
-    } while ((this.repo.hasSession(code) || this.series.has(code)) && attempts < 100);
+    } while ((this.repo.hasSession(code) || this.repo.hasSeries(code)) && attempts < 100);
     return code;
   }
 
@@ -153,11 +151,11 @@ export class QaStore {
   // ==========================================
 
   public getSeries(code: string): Series | undefined {
-    return this.series.get(code.toUpperCase());
+    return this.repo.getSeries(code.toUpperCase());
   }
 
   public getAllSeries(): Series[] {
-    return Array.from(this.series.values());
+    return this.repo.listSeries();
   }
 
   /**
@@ -215,7 +213,7 @@ export class QaStore {
   }
 
   public getActiveLiveRoom(): { series?: Series; session?: Session } | null {
-    const allSeries = Array.from(this.series.values());
+    const allSeries = this.repo.listSeries();
     const liveSeries = allSeries.find(s => s.state === 'LIVE') || allSeries[0];
     if (liveSeries) {
       return { series: liveSeries };
@@ -253,7 +251,7 @@ export class QaStore {
       .replace(/[^A-Z0-9_-]/g, '');
 
     if (seriesCode) {
-      if (this.series.has(seriesCode) || this.repo.hasSession(seriesCode)) {
+      if (this.repo.hasSeries(seriesCode) || this.repo.hasSession(seriesCode)) {
         throw new Error(`Custom room code "${seriesCode}" is already in use by another session or workshop. Please choose a different code or use auto-generation.`);
       }
     } else {
@@ -422,10 +420,10 @@ export class QaStore {
       updatedAt: nowIso,
     };
 
-    this.series.set(seriesCode, newSeries);
+    this.repo.setSeries(seriesCode, newSeries);
     this.sessionQuestions.set(seriesCode, []);
     this.repo.initParticipants(seriesCode);
-    this.seriesParticipants.set(seriesCode, new Map());
+    this.repo.initSeriesParticipants(seriesCode);
     this.auditLogs.set(seriesCode, []);
 
     // Create synthetic root session for legacy join
@@ -1416,11 +1414,8 @@ export class QaStore {
     name: string
   ): SeriesParticipant {
     const code = seriesCode.toUpperCase();
-    if (!this.seriesParticipants.has(code)) {
-      this.seriesParticipants.set(code, new Map());
-    }
-    const partMap = this.seriesParticipants.get(code)!;
-    let participant = partMap.get(fingerprint);
+    this.repo.initSeriesParticipants(code);
+    let participant = this.repo.getSeriesParticipant(code, fingerprint);
     const nowIso = new Date().toISOString();
 
     if (!participant) {
@@ -1433,7 +1428,7 @@ export class QaStore {
         questionCount: 0,
         segmentsVisited: ['general'],
       };
-      partMap.set(fingerprint, participant);
+      this.repo.setSeriesParticipant(code, fingerprint, participant);
     } else {
       participant.lastSeenAt = nowIso;
       if (name && participant.name !== name) {
@@ -1450,9 +1445,8 @@ export class QaStore {
     segmentId?: string
   ) {
     // 1. Update Series participant
-    const sMap = this.seriesParticipants.get(code);
-    if (sMap) {
-      let sp = sMap.get(fingerprint);
+    if (this.repo.hasSeriesParticipants(code)) {
+      let sp = this.repo.getSeriesParticipant(code, fingerprint);
       if (!sp) {
         sp = this.registerSeriesParticipant(code, fingerprint, name || 'Participant');
       }
@@ -1474,7 +1468,7 @@ export class QaStore {
   }
 
   public isParticipantBanned(code: string, fingerprint: string): boolean {
-    const sPart = this.seriesParticipants.get(code.toUpperCase())?.get(fingerprint);
+    const sPart = this.repo.getSeriesParticipant(code.toUpperCase(), fingerprint);
     if (sPart?.isBanned) return true;
     const sessPart = this.repo.getParticipant(code.toUpperCase(), fingerprint);
     return sessPart?.isBanned || false;
@@ -1493,7 +1487,7 @@ export class QaStore {
     let updated = false;
 
     // Series level ban
-    const sPart = this.seriesParticipants.get(code)?.get(fingerprint);
+    const sPart = this.repo.getSeriesParticipant(code, fingerprint);
     if (sPart) {
       sPart.isBanned = banned;
       updated = true;
@@ -1522,8 +1516,7 @@ export class QaStore {
   }
 
   public getSeriesParticipants(seriesCode: string): SeriesParticipant[] {
-    const map = this.seriesParticipants.get(seriesCode.toUpperCase());
-    return map ? Array.from(map.values()) : [];
+    return this.repo.listSeriesParticipants(seriesCode.toUpperCase());
   }
 
   // ==========================================
@@ -1536,7 +1529,7 @@ export class QaStore {
       createdAt: new Date().toISOString(),
       ...entry,
     };
-    const series = Array.from(this.series.values()).find(s => s.id === entry.seriesId);
+    const series = this.repo.listSeries().find(s => s.id === entry.seriesId);
     const code = series?.seriesCode || entry.seriesId;
 
     if (!this.auditLogs.has(code)) {
@@ -1845,7 +1838,7 @@ export class QaStore {
     const totalUpvotes = allQuestions.reduce((acc, q) => acc + q.upvotes, 0);
     const answeredCount = allQuestions.filter(q => q.status === 'ANSWERED').length;
     const answeredRate = totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0;
-    const uniqueParticipants = this.seriesParticipants.get(code)?.size || 0;
+    const uniqueParticipants = this.repo.countSeriesParticipants(code);
 
     // Timeline buckets (5-minute buckets)
     const timelineMap = new Map<string, { questions: number; upvotes: number; segmentId?: string }>();
@@ -2117,7 +2110,7 @@ export class QaStore {
       generatedAt: new Date().toISOString(),
       totalQuestions: allQuestions.length,
       totalUpvotes: allQuestions.reduce((sum, q) => sum + q.upvotes, 0),
-      totalParticipants: this.seriesParticipants.get(code)?.size || 0,
+      totalParticipants: this.repo.countSeriesParticipants(code),
       executiveSummary: report.executiveSummary,
       segmentReports,
       speakerComparisons,
@@ -2136,7 +2129,7 @@ export class QaStore {
     const code = seriesCode.toUpperCase();
     const existing = this.repo.getSession(code);
     if (existing) return existing;
-    const series = this.series.get(code);
+    const series = this.repo.getSeries(code);
     if (!series) return undefined;
     const nowIso = new Date().toISOString();
     const rootSession: Session = {
@@ -2185,7 +2178,7 @@ export class QaStore {
       .replace(/[^A-Z0-9_-]/g, '');
 
     if (joinCode) {
-      if (this.repo.hasSession(joinCode) || this.series.has(joinCode)) {
+      if (this.repo.hasSession(joinCode) || this.repo.hasSeries(joinCode)) {
         throw new Error(`Custom room code "${joinCode}" is already in use by another session or workshop. Please choose a different code or use auto-generation.`);
       }
     } else {
@@ -2475,10 +2468,10 @@ export class QaStore {
       updatedAt: nowIso,
     };
 
-    this.series.set(defaultCode, seriesNext26);
+    this.repo.setSeries(defaultCode, seriesNext26);
     this.sessionQuestions.set(defaultCode, []);
     this.repo.initParticipants(defaultCode);
-    this.seriesParticipants.set(defaultCode, new Map());
+    this.repo.initSeriesParticipants(defaultCode);
     this.auditLogs.set(defaultCode, []);
 
     // Seed keynote root session for standalone backward compatibility
@@ -2816,10 +2809,10 @@ export class QaStore {
       updatedAt: nowIso,
     };
 
-    this.series.set(nvidiaCode, seriesNvidia);
+    this.repo.setSeries(nvidiaCode, seriesNvidia);
     this.sessionQuestions.set(nvidiaCode, []);
     this.repo.initParticipants(nvidiaCode);
-    this.seriesParticipants.set(nvidiaCode, new Map());
+    this.repo.initSeriesParticipants(nvidiaCode);
     this.auditLogs.set(nvidiaCode, []);
 
     const keynoteNvidiaSession: Session = {
@@ -3114,10 +3107,10 @@ export class QaStore {
       updatedAt: nowIso,
     };
 
-    this.series.set(gdgCode, seriesGdgLive);
+    this.repo.setSeries(gdgCode, seriesGdgLive);
     this.sessionQuestions.set(gdgCode, []);
     this.repo.initParticipants(gdgCode);
-    this.seriesParticipants.set(gdgCode, new Map());
+    this.repo.initSeriesParticipants(gdgCode);
     this.auditLogs.set(gdgCode, []);
 
     const keynoteGdgSession: Session = {

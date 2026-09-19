@@ -306,6 +306,66 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       expect(questions.length).toBeGreaterThan(0); // question was submitted
       // but participants map was never created/updated due to the guard
     });
+
+    it('should NOT create series participants for a standalone session that has only a legacy participant map', async () => {
+      // A standalone session gets a legacy participant map (createSession) but is not a series,
+      // so no series-participant map exists for its code. The hasSeriesParticipants guard in
+      // recordParticipantQuestion must leave the series-participant side untouched.
+      const session = store.createSession({ title: 'Standalone Room', customJoinCode: 'SOLO01' });
+      expect(store.getSeries(session.joinCode)).toBeUndefined();
+      expect(store.getSeriesParticipants(session.joinCode)).toEqual([]);
+
+      const res = await store.submitQuestion({
+        joinCode: session.joinCode,
+        clientFingerprint: 'fp-standalone',
+        authorName: 'Standalone User',
+        isAnonymous: false,
+        content: 'How does this standalone room handle participant tracking?',
+      });
+      expect(res.question).toBeDefined();
+
+      // Legacy side WAS updated (proves the submission reached recordParticipantQuestion)
+      const legacy = store.getParticipants(session.joinCode).find(p => p.clientFingerprint === 'fp-standalone');
+      expect(legacy?.questionCount).toBe(1);
+
+      // Series side must NOT have been created by the submission
+      expect(store.getSeriesParticipants(session.joinCode).length).toBe(0);
+    });
+
+    it('should NOT create series participants for a backing session code (NEXT26-S1) with no series-participant map', async () => {
+      const backingCode = 'NEXT26-S1';
+      expect(store.getSession(backingCode)).toBeDefined();
+      expect(store.getSeriesParticipants(backingCode)).toEqual([]);
+
+      const res = await store.submitQuestion({
+        joinCode: backingCode,
+        clientFingerprint: 'fp-backing-series-guard',
+        authorName: 'Backing User',
+        isAnonymous: false,
+        content: 'Does a backing session register series participants?',
+      });
+      expect(res.question).toBeDefined();
+
+      expect(store.getSeriesParticipants(backingCode).length).toBe(0);
+    });
+
+    it('should still update series participants for a real series code (guard passes when the map exists)', async () => {
+      const fp = 'fp-series-guard-positive';
+      const res = await store.submitQuestion({
+        joinCode: 'NEXT26',
+        clientFingerprint: fp,
+        authorName: 'Series User',
+        isAnonymous: false,
+        content: 'Does a real series update its series participant record?',
+        segmentId: 'seg-1',
+      });
+      expect(res.question).toBeDefined();
+
+      const sp = store.getSeriesParticipants('NEXT26').find(p => p.clientFingerprint === fp);
+      expect(sp).toBeDefined();
+      expect(sp?.questionCount).toBe(1);
+      expect(sp?.segmentsVisited).toContain('seg-1');
+    });
   });
 
   describe('7. Grounded RAG on Deck vs Generic AI Answer Synthesis', () => {
