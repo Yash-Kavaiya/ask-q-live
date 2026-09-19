@@ -7,6 +7,7 @@ import {
   WordFrequency,
   QuestionStatus,
   Series,
+  SeriesState,
   Segment,
   SegmentState,
   UserAccessInfo,
@@ -1040,6 +1041,248 @@ export class QaStore {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Applies a partial metadata patch to a series (organizer only).
+   * Absent fields are left untouched; revision/updatedAt always advance.
+   */
+  public updateSeriesMetadata(
+    joinCode: string,
+    patch: {
+      title?: string;
+      description?: string;
+      contextData?: string;
+      seriesContextData?: string;
+      settings?: Partial<SeriesSettings>;
+      state?: SeriesState;
+      geminiApiKey?: string;
+    },
+    token: string | undefined
+  ): { success: boolean; status?: number; error?: string; series?: Series } {
+    const code = joinCode.toUpperCase();
+    const series = this.getSeries(code);
+    if (!series) return { success: false, status: 404, error: 'Series not found' };
+
+    const auth = this.verifyToken(code, token);
+    if (auth.role !== 'organizer') {
+      return { success: false, status: 403, error: 'Organizer permission required' };
+    }
+
+    if (patch.title) series.title = patch.title;
+    if (patch.description !== undefined) series.description = patch.description;
+    if (patch.contextData !== undefined) {
+      series.contextData = patch.contextData;
+      series.seriesContextData = patch.contextData;
+    }
+    if (patch.seriesContextData !== undefined) {
+      series.seriesContextData = patch.seriesContextData;
+      series.contextData = patch.seriesContextData;
+    }
+    if (patch.settings) {
+      series.settings = { ...series.settings, ...patch.settings };
+    }
+    if (patch.state) {
+      series.state = patch.state;
+    }
+    if (patch.geminiApiKey !== undefined) {
+      const key = typeof patch.geminiApiKey === 'string' ? patch.geminiApiKey.trim() : '';
+      series.geminiApiKey =
+        key && key.length >= 10 && key !== 'MY_GEMINI_API_KEY' && key !== 'TODO' ? key : undefined;
+    }
+    series.revision = (series.revision || 1) + 1;
+    series.updatedAt = new Date().toISOString();
+
+    this.logAudit({
+      seriesId: series.id,
+      actorRole: 'organizer',
+      actorRef: 'organizer',
+      action: 'SERIES_UPDATED',
+      targetId: series.id,
+    });
+
+    return { success: true, series };
+  }
+
+  /**
+   * Replaces the series-level grounding context (organizer only)
+   */
+  public updateSeriesGrounding(
+    joinCode: string,
+    contextData: string,
+    token: string | undefined
+  ): { success: boolean; status?: number; error?: string } {
+    const code = joinCode.toUpperCase();
+    const series = this.getSeries(code);
+    if (!series) return { success: false, status: 404, error: 'Series not found' };
+
+    const auth = this.verifyToken(code, token);
+    if (auth.role !== 'organizer') {
+      return { success: false, status: 403, error: 'Organizer permission required' };
+    }
+
+    series.contextData = contextData || '';
+    series.seriesContextData = contextData || '';
+    series.revision = (series.revision || 1) + 1;
+    series.updatedAt = new Date().toISOString();
+
+    this.logAudit({
+      seriesId: series.id,
+      actorRole: 'organizer',
+      actorRef: 'organizer',
+      action: 'SERIES_GROUNDING_UPDATED',
+      targetId: series.id,
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Ends an entire series, closing any LIVE/PAUSED segments (organizer only)
+   */
+  public endSeries(
+    joinCode: string,
+    token: string | undefined
+  ): { success: boolean; status?: number; error?: string; series?: Series } {
+    const code = joinCode.toUpperCase();
+    const series = this.getSeries(code);
+    if (!series) return { success: false, status: 404, error: 'Series not found' };
+
+    const auth = this.verifyToken(code, token);
+    if (auth.role !== 'organizer') {
+      return { success: false, status: 403, error: 'Organizer permission required' };
+    }
+
+    series.state = 'ENDED';
+    const nowIso = new Date().toISOString();
+    series.segments.forEach(seg => {
+      if (seg.state === 'LIVE' || seg.state === 'PAUSED' || seg.status === 'LIVE' || seg.status === 'PAUSED') {
+        seg.state = 'ENDED';
+        seg.status = 'ENDED';
+        seg.actualEnd = nowIso;
+        seg.actualEndTime = nowIso;
+      }
+    });
+    series.liveSegmentId = null;
+    series.activeSegmentId = null;
+    series.revision = (series.revision || 1) + 1;
+    series.updatedAt = nowIso;
+
+    this.logAudit({
+      seriesId: series.id,
+      actorRole: 'organizer',
+      actorRef: 'organizer',
+      action: 'SERIES_ENDED',
+      targetId: series.id,
+    });
+
+    return { success: true, series };
+  }
+
+  /**
+   * Applies a partial profile patch to a segment (organizer, or the speaker
+   * scoped to this segment). Keeps the nested speaker profile in sync.
+   * Absent fields are left untouched; revision/updatedAt always advance.
+   */
+  public updateSegmentProfile(
+    joinCode: string,
+    segmentId: string,
+    patch: Partial<Segment>,
+    token: string | undefined
+  ): { success: boolean; status?: number; error?: string; segment?: Segment } {
+    const code = joinCode.toUpperCase();
+    const series = this.getSeries(code);
+    if (!series) return { success: false, status: 404, error: 'Series not found' };
+
+    const auth = this.verifyToken(code, token);
+    if (auth.role !== 'organizer' && !(auth.role === 'speaker' && auth.scope.includes(segmentId))) {
+      return { success: false, status: 403, error: 'Unauthorized to update this segment' };
+    }
+
+    const seg = series.segments.find(s => s.id === segmentId);
+    if (!seg) return { success: false, status: 404, error: 'Segment not found' };
+
+    if (patch.title) seg.title = patch.title;
+    if (patch.speakerName) seg.speakerName = patch.speakerName;
+    if (patch.speakerBio !== undefined) seg.speakerBio = patch.speakerBio;
+    if (patch.speakerRole !== undefined) seg.speakerRole = patch.speakerRole;
+    if (patch.speakerAvatar !== undefined) seg.speakerAvatar = patch.speakerAvatar;
+    if (patch.speakerOrg !== undefined) seg.speakerOrg = patch.speakerOrg;
+    if (patch.topicSummary !== undefined) seg.topicSummary = patch.topicSummary;
+    if (patch.sessionDescription !== undefined) {
+      const desc = String(patch.sessionDescription || '').trim();
+      seg.sessionDescription = desc || undefined;
+      // Keep topicSummary in sync when host edits the public session blurb
+      if (desc) seg.topicSummary = desc;
+    }
+    if (patch.speakerEmail !== undefined) {
+      const email = String(patch.speakerEmail || '').trim().toLowerCase();
+      seg.speakerEmail = email && email.includes('@') ? email : undefined;
+    }
+    if (patch.speakerX !== undefined) {
+      seg.speakerX = String(patch.speakerX || '').trim() || undefined;
+    }
+    if (patch.speakerLinkedIn !== undefined) {
+      seg.speakerLinkedIn = String(patch.speakerLinkedIn || '').trim() || undefined;
+    }
+    if (patch.speakerWebsite !== undefined) {
+      seg.speakerWebsite = String(patch.speakerWebsite || '').trim() || undefined;
+    }
+    // Keep nested speaker profile socials aligned
+    if (seg.speaker) {
+      if (patch.speakerX !== undefined) seg.speaker.xUrl = seg.speakerX;
+      if (patch.speakerLinkedIn !== undefined) seg.speaker.linkedinUrl = seg.speakerLinkedIn;
+      if (patch.speakerWebsite !== undefined) seg.speaker.websiteUrl = seg.speakerWebsite;
+      if (patch.speakerBio !== undefined) seg.speaker.bio = seg.speakerBio;
+      if (patch.speakerOrg !== undefined) seg.speaker.org = seg.speakerOrg;
+    }
+    if (patch.groundingContext !== undefined) {
+      seg.groundingContext = patch.groundingContext;
+      seg.contextData = patch.groundingContext;
+    }
+    if (patch.contextData !== undefined) {
+      seg.contextData = patch.contextData;
+      seg.groundingContext = patch.contextData;
+    }
+    if (patch.categories && Array.isArray(patch.categories)) seg.categories = patch.categories;
+    if (patch.durationMinutes) {
+      seg.durationMinutes = patch.durationMinutes;
+      seg.scheduledDurationMinutes = patch.durationMinutes;
+    }
+
+    series.revision = (series.revision || 1) + 1;
+    series.updatedAt = new Date().toISOString();
+
+    return { success: true, segment: seg };
+  }
+
+  /**
+   * Replaces a segment's grounding context (organizer, or the speaker scoped to this segment)
+   */
+  public updateSegmentGrounding(
+    joinCode: string,
+    segmentId: string,
+    groundingContext: string,
+    token: string | undefined
+  ): { success: boolean; status?: number; error?: string; segment?: Segment } {
+    const code = joinCode.toUpperCase();
+    const series = this.getSeries(code);
+    if (!series) return { success: false, status: 404, error: 'Series not found' };
+
+    const auth = this.verifyToken(code, token);
+    if (auth.role !== 'organizer' && !(auth.role === 'speaker' && auth.scope.includes(segmentId))) {
+      return { success: false, status: 403, error: 'Unauthorized to update this segment' };
+    }
+
+    const seg = series.segments.find(s => s.id === segmentId);
+    if (!seg) return { success: false, status: 404, error: 'Segment not found' };
+
+    seg.groundingContext = groundingContext || '';
+    seg.contextData = groundingContext || '';
+    series.revision = (series.revision || 1) + 1;
+    series.updatedAt = new Date().toISOString();
+
+    return { success: true, segment: seg };
   }
 
   /**

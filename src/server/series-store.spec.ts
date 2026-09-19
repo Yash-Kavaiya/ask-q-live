@@ -922,6 +922,474 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
     }, 30000);
   });
 
+  // Characterization tests for the five use-case methods extracted from the
+  // route handlers in server.ts (PATCH /api/series/:code, POST .../grounding,
+  // POST .../end, PATCH .../segments/:id, POST .../segments/:id/grounding).
+  // Each expectation mirrors what the inline route logic did before the move.
+  describe('10. Use-case methods replace direct route mutation', () => {
+    const ORG = 'organizer_secret_next26';
+    const SEG1_SPEAKER = 'speaker_token_sundar';
+    const SEG2_SPEAKER = 'speaker_token_maya';
+
+    describe('updateSeriesMetadata', () => {
+      it('requires organizer token and applies a partial patch', () => {
+        const denied = store.updateSeriesMetadata('NEXT26', { title: 'Hacked' }, 'not-a-real-token');
+        expect(denied.success).toBe(false);
+        expect(denied.status).toBe(403);
+
+        const before = store.getSeries('NEXT26')!;
+        const initialRevision = before.revision || 1;
+        const result = store.updateSeriesMetadata('NEXT26', { title: 'Cloud Summit (Updated)' }, ORG);
+        expect(result.success).toBe(true);
+        expect(result.series?.title).toBe('Cloud Summit (Updated)');
+        expect(store.getSeries('NEXT26')!.revision).toBe(initialRevision + 1);
+
+        const audit = store.getAuditLog('NEXT26');
+        expect(audit.some(a => a.action === 'SERIES_UPDATED')).toBe(true);
+      });
+
+      it('a denied call mutates nothing and writes no audit entry', () => {
+        const series = store.getSeries('NEXT26')!;
+        const titleBefore = series.title;
+        const revisionBefore = series.revision;
+        const auditBefore = store.getAuditLog('NEXT26').length;
+
+        for (const badToken of [undefined, '', 'not-a-real-token', SEG1_SPEAKER]) {
+          const denied = store.updateSeriesMetadata('NEXT26', { title: 'Hacked', state: 'ENDED' }, badToken);
+          expect(denied).toEqual({ success: false, status: 403, error: 'Organizer permission required' });
+        }
+
+        expect(series.title).toBe(titleBefore);
+        expect(series.state).toBe('LIVE');
+        expect(series.revision).toBe(revisionBefore);
+        expect(store.getAuditLog('NEXT26').length).toBe(auditBefore);
+      });
+
+      it('returns 404 "Series not found" for an unknown series', () => {
+        expect(store.updateSeriesMetadata('NOPE99', { title: 'x' }, ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Series not found',
+        });
+      });
+
+      it('accepts a lower-case join code and returns the live series object', () => {
+        const result = store.updateSeriesMetadata('next26', { title: 'Lower-case code' }, ORG);
+        expect(result.success).toBe(true);
+        expect(result.series).toBe(store.getSeries('NEXT26'));
+      });
+
+      it('applies only provided fields, but always bumps revision/updatedAt', () => {
+        const series = store.getSeries('NEXT26')!;
+        const snapshot = {
+          title: series.title,
+          description: series.description,
+          contextData: series.contextData,
+          seriesContextData: series.seriesContextData,
+          state: series.state,
+          settings: { ...series.settings },
+        };
+        const revisionBefore = series.revision!;
+
+        const result = store.updateSeriesMetadata('NEXT26', {}, ORG);
+        expect(result.success).toBe(true);
+        expect(series.title).toBe(snapshot.title);
+        expect(series.description).toBe(snapshot.description);
+        expect(series.contextData).toBe(snapshot.contextData);
+        expect(series.seriesContextData).toBe(snapshot.seriesContextData);
+        expect(series.state).toBe(snapshot.state);
+        expect(series.settings).toEqual(snapshot.settings);
+        expect(series.revision).toBe(revisionBefore + 1);
+        expect(new Date(series.updatedAt).getTime()).not.toBeNaN();
+      });
+
+      it('ignores an empty title, but applies an empty description', () => {
+        const series = store.getSeries('NEXT26')!;
+        const titleBefore = series.title;
+        store.updateSeriesMetadata('NEXT26', { title: '', description: '' }, ORG);
+        expect(series.title).toBe(titleBefore);
+        expect(series.description).toBe('');
+      });
+
+      it('keeps contextData and seriesContextData in sync (last-written alias wins)', () => {
+        const series = store.getSeries('NEXT26')!;
+        store.updateSeriesMetadata('NEXT26', { contextData: 'via contextData' }, ORG);
+        expect(series.contextData).toBe('via contextData');
+        expect(series.seriesContextData).toBe('via contextData');
+
+        store.updateSeriesMetadata('NEXT26', { seriesContextData: 'via seriesContextData' }, ORG);
+        expect(series.contextData).toBe('via seriesContextData');
+        expect(series.seriesContextData).toBe('via seriesContextData');
+
+        store.updateSeriesMetadata('NEXT26', { contextData: 'A', seriesContextData: 'B' }, ORG);
+        expect(series.contextData).toBe('B');
+        expect(series.seriesContextData).toBe('B');
+      });
+
+      it('shallow-merges settings and applies state', () => {
+        const series = store.getSeries('NEXT26')!;
+        const before = { ...series.settings };
+        store.updateSeriesMetadata('NEXT26', { settings: { allowPreSubmit: false, graceWindowMinutes: 3 }, state: 'SCHEDULED' }, ORG);
+        expect(series.settings).toEqual({ ...before, allowPreSubmit: false, graceWindowMinutes: 3 });
+        expect(series.state).toBe('SCHEDULED');
+      });
+
+      it('normalizes geminiApiKey exactly as the route did (trim; reject short/placeholder/non-string)', () => {
+        const series = store.getSeries('NEXT26')!;
+        store.updateSeriesMetadata('NEXT26', { geminiApiKey: '  AIzaSyExampleKey123  ' }, ORG);
+        expect(series.geminiApiKey).toBe('AIzaSyExampleKey123');
+
+        // not provided -> untouched
+        store.updateSeriesMetadata('NEXT26', { title: 'no key in patch' }, ORG);
+        expect(series.geminiApiKey).toBe('AIzaSyExampleKey123');
+
+        for (const rejected of ['short', 'MY_GEMINI_API_KEY', 'TODO', '   ', '']) {
+          series.geminiApiKey = 'AIzaSyExampleKey123';
+          store.updateSeriesMetadata('NEXT26', { geminiApiKey: rejected }, ORG);
+          expect(series.geminiApiKey, `key ${JSON.stringify(rejected)}`).toBeUndefined();
+        }
+
+        series.geminiApiKey = 'AIzaSyExampleKey123';
+        store.updateSeriesMetadata('NEXT26', { geminiApiKey: 12345678901234 as unknown as string }, ORG);
+        expect(series.geminiApiKey).toBeUndefined();
+      });
+    });
+
+    describe('updateSeriesGrounding', () => {
+      it('sets both contextData and seriesContextData and logs SERIES_GROUNDING_UPDATED', () => {
+        const revisionBefore = store.getSeries('NEXT26')!.revision!;
+        const result = store.updateSeriesGrounding('NEXT26', 'New grounding text', ORG);
+        expect(result.success).toBe(true);
+        const series = store.getSeries('NEXT26')!;
+        expect(series.contextData).toBe('New grounding text');
+        expect(series.seriesContextData).toBe('New grounding text');
+        expect(series.revision).toBe(revisionBefore + 1);
+        expect(store.getAuditLog('NEXT26').some(a => a.action === 'SERIES_GROUNDING_UPDATED')).toBe(true);
+      });
+
+      it('coerces a missing/empty contextData to an empty string', () => {
+        const series = store.getSeries('NEXT26')!;
+        store.updateSeriesGrounding('NEXT26', undefined as unknown as string, ORG);
+        expect(series.contextData).toBe('');
+        expect(series.seriesContextData).toBe('');
+      });
+
+      it('denies a bad token without mutating or auditing, and 404s an unknown series', () => {
+        const series = store.getSeries('NEXT26')!;
+        const contextBefore = series.contextData;
+        const revisionBefore = series.revision;
+        const auditBefore = store.getAuditLog('NEXT26').length;
+
+        const denied = store.updateSeriesGrounding('NEXT26', 'Hacked', 'not-a-real-token');
+        expect(denied).toEqual({ success: false, status: 403, error: 'Organizer permission required' });
+        expect(store.updateSeriesGrounding('NEXT26', 'Hacked', undefined).status).toBe(403);
+        expect(store.updateSeriesGrounding('NEXT26', 'Hacked', SEG1_SPEAKER).status).toBe(403);
+        expect(series.contextData).toBe(contextBefore);
+        expect(series.revision).toBe(revisionBefore);
+        expect(store.getAuditLog('NEXT26').length).toBe(auditBefore);
+
+        expect(store.updateSeriesGrounding('NOPE99', 'x', ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Series not found',
+        });
+      });
+    });
+
+    describe('endSeries', () => {
+      it('sets series and all live/paused segments to ENDED and logs SERIES_ENDED', () => {
+        const series = store.getSeries('NEXT26')!;
+        expect(series.liveSegmentId).toBe('seg-1');
+        const seg2 = series.segments.find(s => s.id === 'seg-2')!;
+        seg2.state = 'PAUSED';
+        seg2.status = 'PAUSED';
+        const revisionBefore = series.revision!;
+
+        const result = store.endSeries('NEXT26', ORG);
+        expect(result.success).toBe(true);
+        expect(result.series).toBe(series);
+        expect(series.state).toBe('ENDED');
+        expect(series.liveSegmentId).toBeNull();
+        expect(series.activeSegmentId).toBeNull();
+        expect(series.revision).toBe(revisionBefore + 1);
+
+        const seg1 = series.segments.find(s => s.id === 'seg-1')!;
+        expect(seg1.state).toBe('ENDED');
+        expect(seg1.status).toBe('ENDED');
+        expect(seg1.actualEnd).toBe(series.updatedAt);
+        expect(seg1.actualEndTime).toBe(series.updatedAt);
+        expect(seg2.state).toBe('ENDED');
+        expect(seg2.status).toBe('ENDED');
+        expect(seg2.actualEnd).toBe(series.updatedAt);
+
+        // segments that were neither LIVE nor PAUSED are left alone
+        const seg3 = series.segments.find(s => s.id === 'seg-3')!;
+        expect(seg3.state).toBe('SCHEDULED');
+        expect(seg3.actualEnd).toBeUndefined();
+
+        expect(store.getAuditLog('NEXT26').some(a => a.action === 'SERIES_ENDED')).toBe(true);
+      });
+
+      it('denies a bad token without ending anything, and 404s an unknown series', () => {
+        const series = store.getSeries('NEXT26')!;
+        const auditBefore = store.getAuditLog('NEXT26').length;
+
+        for (const badToken of [undefined, 'not-a-real-token', SEG1_SPEAKER]) {
+          expect(store.endSeries('NEXT26', badToken)).toEqual({
+            success: false,
+            status: 403,
+            error: 'Organizer permission required',
+          });
+        }
+        expect(series.state).toBe('LIVE');
+        expect(series.liveSegmentId).toBe('seg-1');
+        expect(series.segments.find(s => s.id === 'seg-1')!.state).toBe('LIVE');
+        expect(store.getAuditLog('NEXT26').length).toBe(auditBefore);
+
+        expect(store.endSeries('NOPE99', ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Series not found',
+        });
+      });
+    });
+
+    describe('updateSegmentProfile', () => {
+      it('applies known fields and keeps nested speaker profile in sync', () => {
+        const denied = store.updateSegmentProfile('NEXT26', 'seg-1', { title: 'Hacked' }, 'wrong-token');
+        expect(denied.success).toBe(false);
+
+        // Seeded NEXT26 segments carry no nested `speaker`; a segment created
+        // through addSegment does, and that is where the sync applies.
+        const added = store.addSegment('NEXT26', { title: 'Synced Talk', speakerName: 'Ada' }, ORG)!;
+        const result = store.updateSegmentProfile(
+          'NEXT26',
+          added.id,
+          { speakerBio: 'New bio', speakerX: 'https://x.com/example' },
+          ORG
+        );
+        expect(result.success).toBe(true);
+        expect(result.segment?.speakerBio).toBe('New bio');
+        expect(result.segment?.speaker?.bio).toBe('New bio');
+        expect(result.segment?.speaker?.xUrl).toBe('https://x.com/example');
+      });
+
+      it('updates a segment without a nested speaker profile without creating one', () => {
+        const seg1 = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-1')!;
+        expect(seg1.speaker).toBeUndefined();
+        const result = store.updateSegmentProfile('NEXT26', 'seg-1', { speakerBio: 'Only top-level', speakerOrg: 'Acme' }, ORG);
+        expect(result.success).toBe(true);
+        expect(seg1.speakerBio).toBe('Only top-level');
+        expect(seg1.speakerOrg).toBe('Acme');
+        expect(seg1.speaker).toBeUndefined();
+      });
+
+      it('syncs only the provided social/bio/org fields onto the nested speaker', () => {
+        const added = store.addSegment(
+          'NEXT26',
+          { title: 'T', speakerName: 'Ada', speakerBio: 'orig bio', speakerOrg: 'orig org', speakerLinkedIn: 'https://li/orig' },
+          ORG
+        )!;
+        const result = store.updateSegmentProfile(
+          'NEXT26',
+          added.id,
+          { speakerWebsite: '  https://ada.dev  ', speakerOrg: 'New Org', speakerLinkedIn: '   ' },
+          ORG
+        );
+        const seg = result.segment!;
+        expect(seg.speakerWebsite).toBe('https://ada.dev');
+        expect(seg.speaker?.websiteUrl).toBe('https://ada.dev');
+        expect(seg.speakerOrg).toBe('New Org');
+        expect(seg.speaker?.org).toBe('New Org');
+        // blank LinkedIn clears both copies
+        expect(seg.speakerLinkedIn).toBeUndefined();
+        expect(seg.speaker?.linkedinUrl).toBeUndefined();
+        // not provided -> nested bio untouched
+        expect(seg.speaker?.bio).toBe('orig bio');
+      });
+
+      it('enforces auth: organizer or the speaker scoped to this segment only', () => {
+        const seg1 = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-1')!;
+        const titleBefore = seg1.title;
+        const revisionBefore = store.getSeries('NEXT26')!.revision;
+
+        for (const badToken of [undefined, 'wrong-token', SEG2_SPEAKER]) {
+          expect(store.updateSegmentProfile('NEXT26', 'seg-1', { title: 'Hacked' }, badToken)).toEqual({
+            success: false,
+            status: 403,
+            error: 'Unauthorized to update this segment',
+          });
+        }
+        expect(seg1.title).toBe(titleBefore);
+        expect(store.getSeries('NEXT26')!.revision).toBe(revisionBefore);
+
+        const own = store.updateSegmentProfile('NEXT26', 'seg-1', { title: 'Renamed by speaker' }, SEG1_SPEAKER);
+        expect(own.success).toBe(true);
+        expect(seg1.title).toBe('Renamed by speaker');
+      });
+
+      it('returns 404 for an unknown series and for an unknown segment', () => {
+        expect(store.updateSegmentProfile('NOPE99', 'seg-1', { title: 'x' }, ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Series not found',
+        });
+        expect(store.updateSegmentProfile('NEXT26', 'seg-does-not-exist', { title: 'x' }, ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Segment not found',
+        });
+      });
+
+      it('leaves untouched fields alone, ignores falsy title/speakerName/durationMinutes, and still bumps revision', () => {
+        const series = store.getSeries('NEXT26')!;
+        const seg = series.segments.find(s => s.id === 'seg-2')!;
+        const snapshot = { ...seg };
+        const revisionBefore = series.revision!;
+
+        const result = store.updateSegmentProfile(
+          'NEXT26',
+          'seg-2',
+          { title: '', speakerName: '', durationMinutes: 0, categories: 'nope' as unknown as string[] },
+          ORG
+        );
+        expect(result.success).toBe(true);
+        expect(result.segment).toBe(seg);
+        expect(seg).toEqual(snapshot);
+        expect(series.revision).toBe(revisionBefore + 1);
+      });
+
+      it('applies an empty string to fields guarded by !== undefined (speakerBio, topicSummary)', () => {
+        const seg = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-2')!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerBio: '', topicSummary: '' }, ORG);
+        expect(seg.speakerBio).toBe('');
+        expect(seg.topicSummary).toBe('');
+      });
+
+      it('sessionDescription is trimmed and, when non-empty, also overwrites topicSummary', () => {
+        const seg = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-2')!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { topicSummary: 'original summary' }, ORG);
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { sessionDescription: '   A public blurb   ' }, ORG);
+        expect(seg.sessionDescription).toBe('A public blurb');
+        expect(seg.topicSummary).toBe('A public blurb');
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { sessionDescription: '    ' }, ORG);
+        expect(seg.sessionDescription).toBeUndefined();
+        expect(seg.topicSummary).toBe('A public blurb');
+      });
+
+      it('speakerEmail is lower-cased/trimmed and dropped when it lacks "@"', () => {
+        const seg = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-2')!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerEmail: '  Maya.Chen@Example.COM ' }, ORG);
+        expect(seg.speakerEmail).toBe('maya.chen@example.com');
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerEmail: 'not-an-email' }, ORG);
+        expect(seg.speakerEmail).toBeUndefined();
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerEmail: 'a@b.co' }, ORG);
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerEmail: '' }, ORG);
+        expect(seg.speakerEmail).toBeUndefined();
+
+        // undefined leaves whatever is there
+        store.updateSegmentProfile('NEXT26', 'seg-2', { speakerEmail: 'keep@me.io' }, ORG);
+        store.updateSegmentProfile('NEXT26', 'seg-2', { title: 'other change' }, ORG);
+        expect(seg.speakerEmail).toBe('keep@me.io');
+      });
+
+      it('keeps groundingContext and contextData in sync (contextData wins when both are sent)', () => {
+        const seg = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-2')!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { groundingContext: 'via grounding' }, ORG);
+        expect(seg.groundingContext).toBe('via grounding');
+        expect(seg.contextData).toBe('via grounding');
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { contextData: 'via context' }, ORG);
+        expect(seg.groundingContext).toBe('via context');
+        expect(seg.contextData).toBe('via context');
+
+        store.updateSegmentProfile('NEXT26', 'seg-2', { groundingContext: 'G', contextData: 'C' }, ORG);
+        expect(seg.groundingContext).toBe('C');
+        expect(seg.contextData).toBe('C');
+      });
+
+      it('applies categories arrays and mirrors durationMinutes onto scheduledDurationMinutes', () => {
+        const seg = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-2')!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { categories: ['A', 'B'], durationMinutes: 33 }, ORG);
+        expect(seg.categories).toEqual(['A', 'B']);
+        expect(seg.durationMinutes).toBe(33);
+        expect(seg.scheduledDurationMinutes).toBe(33);
+      });
+
+      it('writes no audit entry (the original route logged nothing)', () => {
+        const auditBefore = store.getAuditLog('NEXT26').length;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { title: 'Quiet rename' }, ORG);
+        expect(store.getAuditLog('NEXT26').length).toBe(auditBefore);
+      });
+
+      it('bumps the series revision and updatedAt on success', () => {
+        const series = store.getSeries('NEXT26')!;
+        const revisionBefore = series.revision!;
+        store.updateSegmentProfile('NEXT26', 'seg-2', { title: 'Rev bump' }, ORG);
+        expect(series.revision).toBe(revisionBefore + 1);
+      });
+    });
+
+    describe('updateSegmentGrounding', () => {
+      it('sets both groundingContext and contextData on the segment', () => {
+        const result = store.updateSegmentGrounding('NEXT26', 'seg-1', 'Segment-specific grounding', ORG);
+        expect(result.success).toBe(true);
+        expect(result.segment?.groundingContext).toBe('Segment-specific grounding');
+        expect(result.segment?.contextData).toBe('Segment-specific grounding');
+      });
+
+      it('coerces missing/empty grounding to an empty string and bumps revision with no audit entry', () => {
+        const series = store.getSeries('NEXT26')!;
+        const revisionBefore = series.revision!;
+        const auditBefore = store.getAuditLog('NEXT26').length;
+
+        const result = store.updateSegmentGrounding('NEXT26', 'seg-2', undefined as unknown as string, ORG);
+        expect(result.success).toBe(true);
+        expect(result.segment?.groundingContext).toBe('');
+        expect(result.segment?.contextData).toBe('');
+        expect(series.revision).toBe(revisionBefore + 1);
+        expect(store.getAuditLog('NEXT26').length).toBe(auditBefore);
+      });
+
+      it('allows the organizer or the segment-scoped speaker, and denies everyone else', () => {
+        const seg1 = store.getSeries('NEXT26')!.segments.find(s => s.id === 'seg-1')!;
+        const groundingBefore = seg1.groundingContext;
+        const revisionBefore = store.getSeries('NEXT26')!.revision;
+
+        for (const badToken of [undefined, 'wrong-token', SEG2_SPEAKER]) {
+          expect(store.updateSegmentGrounding('NEXT26', 'seg-1', 'Hacked', badToken)).toEqual({
+            success: false,
+            status: 403,
+            error: 'Unauthorized to update this segment',
+          });
+        }
+        expect(seg1.groundingContext).toBe(groundingBefore);
+        expect(store.getSeries('NEXT26')!.revision).toBe(revisionBefore);
+
+        const own = store.updateSegmentGrounding('NEXT26', 'seg-1', 'From speaker', SEG1_SPEAKER);
+        expect(own.success).toBe(true);
+        expect(seg1.groundingContext).toBe('From speaker');
+      });
+
+      it('returns 404 for an unknown series and for an unknown segment', () => {
+        expect(store.updateSegmentGrounding('NOPE99', 'seg-1', 'x', ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Series not found',
+        });
+        expect(store.updateSegmentGrounding('NEXT26', 'seg-does-not-exist', 'x', ORG)).toEqual({
+          success: false,
+          status: 404,
+          error: 'Segment not found',
+        });
+      });
+    });
+  });
+
   describe('Phase P1: Single-Session Executive Report Accuracy', () => {
     it('should generate a real, session-specific executive summary (not the generic fallback sentence)', async () => {
       const report = await generatePostSessionReport(
