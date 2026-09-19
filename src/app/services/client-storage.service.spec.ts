@@ -46,4 +46,12 @@ describe('ClientStorageService', () => {
     service.setUpvotedIds('ABC', '["q1"]');
     expect(service.getUpvotedIds('ABC')).toBe('["q1"]');
   });
+
+  it('getters return null and setters no-op when localStorage is missing', () => {
+    vi.stubGlobal('localStorage', undefined);
+    const offline = new ClientStorageService();
+    expect(offline.getFingerprint()).toBeNull();
+    expect(() => offline.setFingerprint('fp-abc123')).not.toThrow();
+    expect(offline.getFingerprint()).toBeNull();
+  });
 });

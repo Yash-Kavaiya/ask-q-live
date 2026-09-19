@@ -4,6 +4,7 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
+import { ClientStorageService } from '../services/client-storage.service';
 import { formatFirebaseAuthError } from '../services/firebase-auth-errors';
 import { UserRole } from '../models/qa.models';
 
@@ -289,6 +290,7 @@ import { UserRole } from '../models/qa.models';
 export class AuthPage {
   public qaService = inject(QaService);
   public firebaseService = inject(FirebaseService);
+  private storage = inject(ClientStorageService);
   private fb = inject(FormBuilder);
 
   public isSignUp = signal<boolean>(false);
@@ -363,10 +365,7 @@ export class AuthPage {
         if (user) {
           this.qaService.userRole.set(this.selectedRole());
           this.qaService.setAttendeeIdentity(name || email.split('@')[0], email);
-          this.qaService.userAuthToken.set('token-' + user.uid);
-          if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.setItem('live_qa_auth_token', 'token-' + user.uid);
-          }
+          this.persistStaffAuthToken(user.uid);
           await this.finishStaffSignIn(email);
         } else {
           this.errorMessage.set('Account creation failed. Please try again.');
@@ -379,10 +378,7 @@ export class AuthPage {
             user.displayName || email.split('@')[0],
             user.email || email
           );
-          this.qaService.userAuthToken.set('token-' + user.uid);
-          if (typeof window !== 'undefined' && window.localStorage) {
-            localStorage.setItem('live_qa_auth_token', 'token-' + user.uid);
-          }
+          this.persistStaffAuthToken(user.uid);
           await this.finishStaffSignIn(user.email || email);
         } else {
           this.errorMessage.set('Sign-in failed. Please check your email and password.');
@@ -393,6 +389,12 @@ export class AuthPage {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  private persistStaffAuthToken(uid: string): void {
+    const token = 'token-' + uid;
+    this.qaService.userAuthToken.set(token);
+    this.storage.setAuthToken(token);
   }
 
   private async finishStaffSignIn(email?: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { filterAndSortQuestions, selectPendingModerationQuestions, selectTopPrioritizedQuestions, QuestionFilterState } from './question-filters';
 import type { Question } from '../models/qa.models';
 
@@ -94,10 +94,12 @@ describe('filterAndSortQuestions', () => {
     const questions = [
       makeQuestion({ id: 'byContent', content: 'What about latency?' }),
       makeQuestion({ id: 'byAuthor', authorName: 'Latency Larry' }),
+      makeQuestion({ id: 'bySpeaker', speakerName: 'Dr Latency' }),
+      makeQuestion({ id: 'byAi', aiLine1: 'Caused by latency', aiLine2: 'Check the p99' }),
       makeQuestion({ id: 'noMatch', content: 'Unrelated' }),
     ];
     const result = filterAndSortQuestions(questions, { ...baseState, search: 'latency' });
-    expect(result.map(q => q.id).sort()).toEqual(['byAuthor', 'byContent']);
+    expect(result.map(q => q.id).sort()).toEqual(['byAi', 'byAuthor', 'byContent', 'bySpeaker']);
   });
 
   it('sorts by popular: ANSWERING first, then highest upvotes, then newest', () => {
@@ -118,6 +120,30 @@ describe('filterAndSortQuestions', () => {
     const result = filterAndSortQuestions(questions, { ...baseState, sort: 'recent' });
     expect(result.map(q => q.id)).toEqual(['new', 'old']);
   });
+
+  it('treats sort "top" the same as popular', () => {
+    const questions = [
+      makeQuestion({ id: 'low', upvotes: 1, createdAt: '2026-01-01T00:00:00.000Z' }),
+      makeQuestion({ id: 'high', upvotes: 10, createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const result = filterAndSortQuestions(questions, { ...baseState, sort: 'top' });
+    expect(result.map(q => q.id)).toEqual(['high', 'low']);
+  });
+
+  it('sorts by trending: ANSWERING first, then recency-weighted upvotes', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-01-01T01:00:00.000Z'));
+    const questions = [
+      makeQuestion({ id: 'oldHigh', upvotes: 20, createdAt: '2025-12-01T00:00:00.000Z' }),
+      makeQuestion({ id: 'fresh', upvotes: 2, createdAt: '2026-01-01T00:50:00.000Z' }),
+      makeQuestion({ id: 'answering', upvotes: 0, status: 'ANSWERING', createdAt: '2025-12-01T00:00:00.000Z' }),
+    ];
+    const result = filterAndSortQuestions(questions, { ...baseState, sort: 'trending' });
+    expect(result.map(q => q.id)).toEqual(['answering', 'fresh', 'oldHigh']);
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('selectPendingModerationQuestions', () => {

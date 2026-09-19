@@ -4,12 +4,25 @@ import {
   SessionSettings, SpeakerInviteRecord, TelemetryMetrics, UserAccessInfo, WordFrequency,
 } from '../models/qa.models';
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+function jsonAuthHeaders(token: string | null): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+async function readJsonIfOk<T>(res: Response): Promise<T | null> {
+  return res.ok ? res.json() : null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SessionApiClient {
   async authenticateRole(code: string, token: string): Promise<UserAccessInfo> {
     const res = await fetch(`/api/sessions/${code}/auth`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify({ token }),
     });
     return res.json();
@@ -33,8 +46,7 @@ export class SessionApiClient {
       const res = await fetch(`/api/series/${code}/segments`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return null;
-      return res.json();
+      return readJsonIfOk(res);
     } catch {
       return null;
     }
@@ -45,7 +57,7 @@ export class SessionApiClient {
   }): Promise<{ session: Session; series?: SessionSeries }> {
     const res = await fetch(`/api/sessions/${code}/join`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -57,14 +69,12 @@ export class SessionApiClient {
 
   async getSeries(code: string): Promise<{ series?: SessionSeries } | null> {
     const res = await fetch(`/api/series/${code}`);
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async getSession(code: string): Promise<{ session: Session } | null> {
     const res = await fetch(`/api/sessions/${code}`);
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async createSession(payload: {
@@ -75,7 +85,7 @@ export class SessionApiClient {
   }): Promise<Session> {
     const res = await fetch('/api/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -89,7 +99,7 @@ export class SessionApiClient {
   async createSeries(payload: object): Promise<SessionSeries> {
     const res = await fetch('/api/series', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -115,8 +125,7 @@ export class SessionApiClient {
 
   async fetchActiveLiveRoom(): Promise<ActiveLiveRoomPreview | null> {
     const res = await fetch('/api/live-room');
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async fetchSpeakerInvites(email: string): Promise<{ invites: SpeakerInviteRecord[] }> {
@@ -132,10 +141,7 @@ export class SessionApiClient {
   async startSegment(code: string, segmentId: string, token: string | null): Promise<{ series?: SessionSeries }> {
     const res = await fetch(`/api/series/${code}/segments/${segmentId}/start`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ token }),
     });
     if (!res.ok) {
@@ -148,10 +154,7 @@ export class SessionApiClient {
   async endSegment(code: string, segmentId: string, token: string | null): Promise<{ series?: SessionSeries }> {
     const res = await fetch(`/api/series/${code}/segments/${segmentId}/end`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ token }),
     });
     if (!res.ok) {
@@ -164,10 +167,7 @@ export class SessionApiClient {
   async updateSeries(code: string, payload: object, token: string | null): Promise<{ series?: SessionSeries }> {
     const res = await fetch(`/api/series/${code}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ ...payload, token }),
     });
     if (!res.ok) throw new Error('Failed to update series');
@@ -177,10 +177,7 @@ export class SessionApiClient {
   async updateSegment(code: string, segmentId: string, payload: object, token: string | null): Promise<void> {
     const res = await fetch(`/api/series/${code}/segments/${segmentId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ ...payload, token }),
     });
     if (!res.ok) throw new Error('Failed to update segment');
@@ -189,10 +186,7 @@ export class SessionApiClient {
   async addSegment(code: string, payload: object, token: string | null): Promise<void> {
     const res = await fetch(`/api/series/${code}/segments`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ ...payload, token }),
     });
     if (!res.ok) throw new Error('Failed to add segment');
@@ -201,10 +195,7 @@ export class SessionApiClient {
   async reorderSegments(code: string, segmentIds: string[], token: string | null): Promise<void> {
     const res = await fetch(`/api/series/${code}/segments/reorder`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ segmentIds, token }),
     });
     if (!res.ok) throw new Error('Failed to reorder segments');
@@ -216,7 +207,7 @@ export class SessionApiClient {
     segmentQuery: string,
   ): Promise<{ questions?: Question[]; userUpvotedIds?: string[] } | null> {
     const res = await fetch(`/api/sessions/${code}/questions?fingerprint=${fingerprint}${segmentQuery}`);
-    return res.ok ? res.json() : null;
+    return readJsonIfOk(res);
   }
 
   async getTelemetry(
@@ -225,17 +216,17 @@ export class SessionApiClient {
     segmentQuery: string,
   ): Promise<TelemetryMetrics | null> {
     const res = await fetch(`/api/sessions/${code}/telemetry?fingerprint=${fingerprint}${segmentQuery}`);
-    return res.ok ? res.json() : null;
+    return readJsonIfOk(res);
   }
 
   async getTeleprompterQueue(code: string, segmentQuery: string): Promise<Question[] | null> {
     const res = await fetch(`/api/sessions/${code}/teleprompter?${segmentQuery}`);
-    return res.ok ? res.json() : null;
+    return readJsonIfOk(res);
   }
 
   async getWordCloud(code: string, segmentQuery: string): Promise<WordFrequency[] | null> {
     const res = await fetch(`/api/sessions/${code}/wordcloud?${segmentQuery}`);
-    return res.ok ? res.json() : null;
+    return readJsonIfOk(res);
   }
 
   async moveQuestionToSegment(
@@ -246,10 +237,7 @@ export class SessionApiClient {
   ): Promise<void> {
     const res = await fetch(`/api/series/${code}/questions/${questionId}/move-segment`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers: jsonAuthHeaders(token),
       body: JSON.stringify({ targetSegmentId, token }),
     });
     if (!res.ok) throw new Error('Failed to move question');
@@ -258,10 +246,9 @@ export class SessionApiClient {
   async requestRagAnswer(code: string, questionId: string): Promise<{ question?: Question } | null> {
     const res = await fetch(`/api/series/${code}/questions/${questionId}/rag-answer`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
     });
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async submitQuestion(
@@ -270,7 +257,7 @@ export class SessionApiClient {
   ): Promise<{ deduplicated: boolean; message?: string; question?: Question }> {
     const res = await fetch(`/api/sessions/${code}/questions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
     const data = await res.json();
@@ -287,19 +274,18 @@ export class SessionApiClient {
   ): Promise<{ upvotes?: number } | null> {
     const res = await fetch(`/api/sessions/${code}/questions/${questionId}/upvote`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify({
         clientFingerprint: fingerprint,
       }),
     });
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async updateQuestionStatus(code: string, questionId: string, payload: object): Promise<void> {
     await fetch(`/api/sessions/${code}/questions/${questionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
   }
@@ -307,7 +293,7 @@ export class SessionApiClient {
   async editQuestionContent(code: string, questionId: string, payload: object): Promise<boolean> {
     const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
     return res.ok;
@@ -316,7 +302,7 @@ export class SessionApiClient {
   async deleteQuestion(code: string, questionId: string, payload: object): Promise<boolean> {
     const res = await fetch(`/api/sessions/${code}/questions/${questionId}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
     return res.ok;
@@ -329,11 +315,10 @@ export class SessionApiClient {
   ): Promise<{ question?: Question } | null> {
     const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async deleteHumanAnswer(
@@ -344,17 +329,16 @@ export class SessionApiClient {
   ): Promise<{ question?: Question } | null> {
     const res = await fetch(`/api/sessions/${code}/questions/${questionId}/answers/${answerId}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify(payload),
     });
-    if (!res.ok) return null;
-    return res.json();
+    return readJsonIfOk(res);
   }
 
   async updateGroundingContext(code: string, contextData: string): Promise<boolean> {
     const res = await fetch(`/api/sessions/${code}/grounding`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify({ contextData }),
     });
     return res.ok;
@@ -363,7 +347,7 @@ export class SessionApiClient {
   async updateSettings(code: string, settings: object): Promise<boolean> {
     const res = await fetch(`/api/sessions/${code}/settings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify({ settings }),
     });
     return res.ok;
@@ -373,7 +357,7 @@ export class SessionApiClient {
     try {
       const res = await fetch(`/api/sessions/${code}/translate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: JSON_HEADERS,
         body: JSON.stringify({ text, targetLanguage }),
       });
       const data = await res.json();
@@ -386,7 +370,7 @@ export class SessionApiClient {
   async generatePostSessionReport(code: string): Promise<PostSessionReport> {
     const res = await fetch(`/api/sessions/${code}/report`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
     });
     if (!res.ok) throw new Error('Report generation failed');
     return res.json();
@@ -401,7 +385,7 @@ export class SessionApiClient {
   async banParticipant(code: string, fingerprint: string, banned: boolean): Promise<boolean> {
     const res = await fetch(`/api/sessions/${code}/participants/${fingerprint}/ban`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: JSON_HEADERS,
       body: JSON.stringify({ banned }),
     });
     return res.ok;
