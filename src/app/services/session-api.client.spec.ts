@@ -93,4 +93,9 @@ describe('SessionApiClient: questions & analytics', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     expect(await client.translateText('ABC123', 'hello', 'fr')).toBe('hello');
   });
+
+  it('banParticipant rejects on a network error instead of returning false', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    await expect(client.banParticipant('ABC123', 'fp1', true)).rejects.toThrow('offline');
+  });
 });

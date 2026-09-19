@@ -1961,7 +1961,7 @@ export class QaService {
     if (!code) return false;
 
     try {
-      return this.api.banParticipant(code, fingerprint, banned);
+      return await this.api.banParticipant(code, fingerprint, banned);
     } catch (err) {
       console.error('Error banning participant:', err);
       return false;
