@@ -22,17 +22,10 @@ import {
   HumanAnswer,
   UserRole,
 } from '../app/models/qa.models.js';
-import {
-  generateTwoLineAnswer,
-  moderateQuestion,
-  checkSemanticDeduplication,
-  generateSeriesExecutiveReport,
-  generatePostSessionReport,
-  isPlausibleApiKey,
-} from './gemini.service.js';
-
+import { isPlausibleApiKey } from './api-key.js';
 import { timingSafeCompare } from './auth.js';
 import { QaRepository } from './qa-repository.js';
+import type { AiGateway } from './ai-gateway.js';
 
 function normalizeSeriesGeminiKey(raw?: string | null): string | undefined {
   const key = (raw || '').trim();
@@ -97,12 +90,58 @@ const STOP_WORDS = new Set([
 
 const UNAMBIGUOUS_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
-export class QaStore {
-  private repo = new QaRepository();
+export interface QaStoreDeps {
+  repo?: QaRepository;
+  ai: AiGateway;
+}
 
-  constructor(seed = false) {
+export class QaStore {
+  private readonly repo: QaRepository;
+  private readonly ai: AiGateway;
+
+  constructor(seed = false, deps: QaStoreDeps) {
+    this.repo = deps.repo ?? new QaRepository();
+    this.ai = deps.ai;
     if (seed) {
       this.seedDefaultSessions();
+    }
+  }
+
+  /**
+   * Claim/auth path: if the join code exists, bind the provided token as
+   * organizer on the series and admin on the root session.
+   */
+  public claimOrganizerToken(joinCode: string, token: string): boolean {
+    const session = this.getSession(joinCode);
+    const series = this.getSeries(joinCode);
+    if (!session && !series) return false;
+    this.writeHostTokens(joinCode, token.trim());
+    return true;
+  }
+
+  /**
+   * Join-session path: only bind tokens that look like host/admin/organizer
+   * secrets, not speaker tokens.
+   */
+  public bindJoinAdminToken(joinCode: string, token: string): void {
+    const clean = token.trim();
+    if (!(clean.startsWith('admin_') || clean.startsWith('org_') || clean.startsWith('host_'))) {
+      return;
+    }
+    this.writeHostTokens(joinCode, clean);
+  }
+
+  private writeHostTokens(joinCode: string, cleanToken: string): void {
+    const code = joinCode.toUpperCase();
+    const session = this.getSession(code);
+    const series = this.getSeries(code);
+    if (session) {
+      session.adminToken = cleanToken;
+      this.repo.setSession(code, session);
+    }
+    if (series) {
+      series.organizerToken = cleanToken;
+      this.repo.setSeries(code, series);
     }
   }
 
@@ -1426,7 +1465,7 @@ export class QaStore {
 
     // Automated Moderation via Gemini
     const modSensitivity = targetSegment?.moderationSensitivity || session?.settings.moderationSensitivity || 'BALANCED';
-    const moderation = await moderateQuestion(params.content, modSensitivity);
+    const moderation = await this.ai.moderateQuestion(params.content, modSensitivity);
 
     let status: QuestionStatus = 'APPROVED';
     if (moderation.recommendedAction === 'AUTO_REJECT') {
@@ -1442,7 +1481,7 @@ export class QaStore {
              (!targetSegment || q.segmentId === targetSegment.id)
       );
 
-      const dedupeResult = await checkSemanticDeduplication(params.content, existingApproved);
+      const dedupeResult = await this.ai.checkSemanticDeduplication(params.content, existingApproved);
       if (dedupeResult.isDuplicate && dedupeResult.matchedQuestionId) {
         const parentQuestion = this.repo.getQuestion(dedupeResult.matchedQuestionId);
         if (parentQuestion) {
@@ -1510,7 +1549,7 @@ export class QaStore {
 
       const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
-      generateTwoLineAnswer(newQuestion.content, mergedGrounding, {
+      this.ai.generateTwoLineAnswer(newQuestion.content, mergedGrounding, {
         apiKey: series?.geminiApiKey,
       })
         .then(aiResult => {
@@ -1823,7 +1862,7 @@ export class QaStore {
       const grounding = targetSeg?.groundingContext || session?.contextData || series?.seriesContextData;
 
       question.aiStatus = 'GENERATING';
-      generateTwoLineAnswer(question.content, grounding, {
+      this.ai.generateTwoLineAnswer(question.content, grounding, {
         apiKey: series?.geminiApiKey,
       })
         .then(aiResult => {
@@ -2264,7 +2303,7 @@ export class QaStore {
 
       let segReport = this.repo.getCachedReport(seg.id);
       if (!segReport || segQuestions.length > segReport.totalQuestions) {
-        const generated = await generatePostSessionReport(
+        const generated = await this.ai.generatePostSessionReport(
           `${seg.speakerName} — ${seg.title}`,
           seg.groundingContext || seg.contextData || '',
           segQuestions,
@@ -2301,7 +2340,7 @@ export class QaStore {
       };
     });
 
-    const report = await generateSeriesExecutiveReport(
+    const report = await this.ai.generateSeriesExecutiveReport(
       series.title,
       series.contextData || series.seriesContextData || '',
       speakersForGemini,
@@ -3520,7 +3559,7 @@ export class QaStore {
     const mergedGrounding = [sessionHeader, speakerHeader, speakerContext, eventContext].filter(Boolean).join('\n\n').substring(0, 10000);
 
     try {
-      const aiResult = await generateTwoLineAnswer(q.content, mergedGrounding, {
+      const aiResult = await this.ai.generateTwoLineAnswer(q.content, mergedGrounding, {
         apiKey: series?.geminiApiKey,
       });
       q.aiLine1 = aiResult.firstLine;

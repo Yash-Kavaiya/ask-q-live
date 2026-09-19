@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QaStore } from './qa-store.js';
+import { QaRepository } from './qa-repository.js';
+import { geminiAiGateway } from './gemini-ai-gateway.js';
 import { timingSafeCompare, resolveAuth, sanitizeSeriesForPublic } from './auth.js';
 import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag, generatePostSessionReport } from './gemini.service.js';
 
@@ -7,7 +9,7 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
   let store: QaStore;
 
   beforeEach(() => {
-    store = new QaStore(true);
+    store = new QaStore(true, { repo: new QaRepository(), ai: geminiAiGateway });
   });
 
   describe('1. Auth & Timing-Safe Comparison', () => {

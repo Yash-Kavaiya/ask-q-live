@@ -7,6 +7,8 @@ import {
 import express from 'express';
 import { join } from 'node:path';
 import { QaStore } from './server/qa-store.js';
+import { QaRepository } from './server/qa-repository.js';
+import { geminiAiGateway } from './server/gemini-ai-gateway.js';
 import { computeSessionMetrics } from './server/report-metrics.js';
 import {
   translateContent,
@@ -33,7 +35,7 @@ try {
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
-const qaStore = new QaStore(false);
+const qaStore = new QaStore(false, { repo: new QaRepository(), ai: geminiAiGateway });
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: [
     'localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0',
@@ -209,18 +211,12 @@ app.post(['/api/series/:code/claim', '/api/series/:code/auth', '/api/sessions/:c
   let authInfo = resolveAuth(qaStore, code, token);
 
   // If claiming or if token provided by host re-entering, bind token as organizer
-  if (authInfo.role === 'attendee' && token) {
-    const session = qaStore.getSession(code);
-    const series = qaStore.getSeries(code);
-    if (session || series) {
-      if (session) session.adminToken = token.trim();
-      if (series) series.organizerToken = token.trim();
-      authInfo = {
-        role: 'organizer',
-        scope: ['*'],
-        token: token.trim(),
-      };
-    }
+  if (authInfo.role === 'attendee' && token && qaStore.claimOrganizerToken(code, token)) {
+    authInfo = {
+      role: 'organizer',
+      scope: ['*'],
+      token: token.trim(),
+    };
   }
 
   res.json(authInfo);
@@ -1058,11 +1054,9 @@ app.post('/api/sessions/:code/join', (req, res) => {
 
   // If host provides adminToken, bind it so authorization works smoothly
   if (adminToken && typeof adminToken === 'string') {
-    const cleanToken = adminToken.trim();
-    if (cleanToken.startsWith('admin_') || cleanToken.startsWith('org_') || cleanToken.startsWith('host_')) {
-      if (session) session.adminToken = cleanToken;
-      if (series) series.organizerToken = cleanToken;
-    }
+    qaStore.bindJoinAdminToken(code, adminToken);
+    session = qaStore.getSession(code) || session;
+    series = qaStore.getSeries(code) || series;
   }
 
   if (!session) {
