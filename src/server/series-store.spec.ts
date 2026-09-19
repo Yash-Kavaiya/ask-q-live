@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QaStore } from './qa-store.js';
 import { QaRepository } from './qa-repository.js';
 import { geminiAiGateway } from './gemini-ai-gateway.js';
+import { silentAiGateway } from './ai-gateway.js';
 import { timingSafeCompare, resolveAuth, sanitizeSeriesForPublic } from './auth.js';
 import { generateTwoLineAnswer, chunkTextForRag, cosineSimilarity, performEmbeddingRag, generatePostSessionReport } from './gemini.service.js';
 
@@ -290,7 +291,7 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       expect(store.getParticipants(backingCode).length).toBe(0);
 
       // Submit a question under the backing session code
-      const res = await store.submitQuestion({
+      await store.submitQuestion({
         joinCode: backingCode,
         clientFingerprint: 'fp-backing-test',
         authorName: 'Test User',
@@ -303,10 +304,10 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       const participantsAfterSubmit = store.getParticipants(backingCode);
       expect(participantsAfterSubmit.length).toBe(0);
 
-      // Verify the question count on the backing session reflects the guard worked
+      // Proves only that the submission went through (so the participant-count assertion above
+      // is not passing merely because nothing was submitted); it says nothing about the guard itself.
       const questions = store.getQuestions(backingCode);
-      expect(questions.length).toBeGreaterThan(0); // question was submitted
-      // but participants map was never created/updated due to the guard
+      expect(questions.length).toBeGreaterThan(0);
     });
 
     it('should NOT create series participants for a standalone session that has only a legacy participant map', async () => {
@@ -367,6 +368,30 @@ describe('Phase P0: Series Data Model, Store, & Auth', () => {
       expect(sp).toBeDefined();
       expect(sp?.questionCount).toBe(1);
       expect(sp?.segmentsVisited).toContain('seg-1');
+    });
+
+    it('should initialize series participant tracking for a series created via createSeries', async () => {
+      // NEXT26 is seeded directly; this covers the createSeries path. If createSeries did not call
+      // initSeriesParticipants, the hasSeriesParticipants guard in recordParticipantQuestion would skip it.
+      const created = store.createSeries({
+        title: 'Participant Tracking Summit',
+        segments: [{ title: 'Opening Talk', speakerName: 'Jane Doe', type: 'TALK' }],
+      });
+      expect(store.getSeriesParticipants(created.seriesCode)).toEqual([]);
+
+      const fp = 'fp-created-series';
+      const res = await store.submitQuestion({
+        joinCode: created.seriesCode,
+        clientFingerprint: fp,
+        authorName: 'Created Series User',
+        isAnonymous: false,
+        content: 'Is participant tracking wired up for a freshly created series?',
+      });
+      expect(res.question).toBeDefined();
+
+      const sp = store.getSeriesParticipants(created.seriesCode).find(p => p.clientFingerprint === fp);
+      expect(sp).toBeDefined();
+      expect(sp?.questionCount).toBe(1);
     });
   });
 
@@ -1424,5 +1449,28 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
         expect(report.executiveSummary).toContain('Edge AI Inference Deep-Dive');
       }
     }, 15000);
+  });
+});
+
+describe('QaStore repository injection', () => {
+  it('stores into the injected repository instead of a private one', () => {
+    const repo = new QaRepository();
+    const store = new QaStore(false, { repo, ai: silentAiGateway });
+
+    const session = store.createSession({ title: 'Injected Room', customJoinCode: 'INJ001' });
+    expect(repo.getSession('INJ001')).toBe(session);
+
+    const series = store.createSeries({ title: 'Injected Series', customSeriesCode: 'INJSER' });
+    expect(repo.getSeries('INJSER')).toBe(series);
+  });
+
+  it('gives each default-constructed store its own repository', () => {
+    const a = new QaStore(false, { ai: silentAiGateway });
+    const b = new QaStore(false, { ai: silentAiGateway });
+
+    a.createSession({ title: 'Only In A', customJoinCode: 'ISO001' });
+
+    expect(a.getSession('ISO001')).toBeDefined();
+    expect(b.getSession('ISO001')).toBeUndefined();
   });
 });

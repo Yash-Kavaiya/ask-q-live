@@ -1076,6 +1076,9 @@ export class QaStore {
   /**
    * Applies a partial metadata patch to a series (organizer only).
    * Absent fields are left untouched; revision/updatedAt always advance.
+   * `patch` is intentionally not defaulted to {} (likewise in updateSegmentProfile): under Express 5 a
+   * body-less request leaves req.body undefined, so one that passes auth for an existing series still
+   * throws a TypeError (HTTP 500), exactly as the original inline route did. Preserved, not an oversight.
    */
   public updateSeriesMetadata(
     joinCode: string,
@@ -1116,6 +1119,8 @@ export class QaStore {
       series.state = patch.state;
     }
     if (patch.geminiApiKey !== undefined) {
+      // Inline typeof guard on purpose: normalizeSeriesGeminiKey would throw on a non-string body value (a 500)
+      // where this yields a clean undefined.
       series.geminiApiKey = normalizeSeriesGeminiKey(
         typeof patch.geminiApiKey === 'string' ? patch.geminiApiKey : ''
       );
@@ -1907,6 +1912,8 @@ export class QaStore {
     }
     this.repo.deleteQuestion(questionId);
     const code = joinCode.toUpperCase();
+    // Always writes, so a code that had no id list now gets an empty one. Unobservable today (no accessor
+    // distinguishes absent from empty); it would become observable if a has/list-codes accessor is added.
     this.repo.setQuestionIds(code, this.repo.getQuestionIds(code).filter(id => id !== questionId));
     return true;
   }
@@ -3571,17 +3578,22 @@ export class QaStore {
       q.aiStatus = 'READY';
       q.updatedAt = new Date().toISOString();
       // The question may have been deleted while the AI call was in flight; don't resurrect it.
+      // Identity, not existence, is deliberate: an existence check would miss a delete + re-create
+      // under the same id and overwrite the new question. It assumes the repository hands back the
+      // same object each time (true for the in-memory repo).
       if (this.repo.getQuestion(questionId) === q) this.repo.setQuestion(questionId, q);
       return q;
     } catch (err) {
       console.error('Manual RAG generation error:', err);
       q.aiStatus = 'FAILED';
+      // Same identity guard as above.
       if (this.repo.getQuestion(questionId) === q) this.repo.setQuestion(questionId, q);
       return q;
     }
   }
 }
 
+// Mutations here are intentionally not written back through the repository (see the QaRepository contract comment).
 function newQuestionLine(q: Question, aiResult: { firstLine: string; secondLine: string; confidenceScore: number; isGroundedOnDeck?: boolean; ragModel?: string; topSimilarity?: number }) {
   q.aiLine1 = aiResult.firstLine;
   q.aiLine2 = aiResult.secondLine;

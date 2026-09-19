@@ -1,5 +1,23 @@
 import { Session, Participant, Series, SeriesParticipant, Question, AuditEntry, PostSessionReport } from '../app/models/qa.models.js';
 
+/**
+ * Synchronous, in-process store: methods return values, not Promises. A
+ * network-backed implementation would have to be async, rippling through
+ * QaStore and server.ts.
+ *
+ * Entities are handed out by reference; QaStore mutates them in place
+ * (series.title = ..., seg.state = ..., participant.questionCount++, question
+ * fields) and relies on that being visible without a write-back. The explicit
+ * setQuestion(...) after a mutation is a convention, NOT applied to the async
+ * AI-answer paths (submitQuestion's and updateQuestionStatus's .then/.catch,
+ * and newQuestionLine): a write-back after an await would resurrect a question
+ * deleted meanwhile (see the getQuestion(id) === q guard in
+ * generateQuestionRagAnswer). A durable repository must handle those itself.
+ *
+ * getQuestionIds, getRateLimitTimestamps and getAuditLog return the live array
+ * on a hit and a fresh, unstored [] on a miss (pushing into it does not
+ * persist). No current caller mutates the returned array.
+ */
 export class QaRepository {
   private sessions = new Map<string, Session>();
   private participants = new Map<string, Map<string, Participant>>();
@@ -8,7 +26,8 @@ export class QaRepository {
   private questions = new Map<string, Question>(); // questionId -> Question
   private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
   private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
-  private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
+  // `${code}:${segmentId or 'default'}:${fp}` (per segment) and `${code}:hourly:${fp}` (per series) -> timestamps[]
+  private submissionRateLimits = new Map<string, number[]>();
   private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
   private cachedSegmentReports = new Map<string, PostSessionReport>(); // segmentId -> PostSessionReport
 
