@@ -19,6 +19,7 @@ import {
   ActiveLiveRoomPreview,
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
+import { ClientStorageService } from './client-storage.service';
 import { filterAndSortQuestions, selectPendingModerationQuestions, selectTopPrioritizedQuestions } from '../utils/question-filters';
 
 export type ActiveTab =
@@ -46,6 +47,7 @@ function isValidToken(token: string | null | undefined): token is string {
 export class QaService {
   public firebaseService = inject(FirebaseService);
   private router = inject(Router);
+  private storage = inject(ClientStorageService);
 
   // Core reactive signals
   public currentSession = signal<Session | null>(null);
@@ -236,24 +238,24 @@ export class QaService {
 
   private initUserIdentity(): void {
     if (typeof window !== 'undefined' && window.localStorage) {
-      let fp = localStorage.getItem('live_qa_fingerprint');
+      let fp = this.storage.getFingerprint();
       if (!fp) {
         fp = 'fp-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
-        localStorage.setItem('live_qa_fingerprint', fp);
+        this.storage.setFingerprint(fp);
       }
       this.userFingerprint.set(fp);
 
-      const savedName = localStorage.getItem('live_qa_username');
+      const savedName = this.storage.getUsername();
       if (savedName) {
         this.userName.set(savedName);
       }
 
-      const savedEmail = localStorage.getItem('live_qa_email');
+      const savedEmail = this.storage.getEmail();
       if (savedEmail) {
         this.userEmail.set(savedEmail);
       }
 
-      const savedToken = localStorage.getItem('live_qa_auth_token');
+      const savedToken = this.storage.getAuthToken();
       if (savedToken) {
         this.userAuthToken.set(savedToken);
       }
@@ -265,15 +267,11 @@ export class QaService {
   public setAttendeeIdentity(name: string, email?: string): void {
     if (name) {
       this.userName.set(name);
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('live_qa_username', name);
-      }
+      this.storage.setUsername(name);
     }
     if (email !== undefined) {
       this.userEmail.set(email);
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('live_qa_email', email);
-      }
+      this.storage.setEmail(email);
     }
   }
 
@@ -381,7 +379,7 @@ export class QaService {
       const urlToken = isValidToken(trimmedToken) ? trimmedToken : null;
       if (urlToken) {
         this.userAuthToken.set(urlToken);
-        localStorage.setItem('live_qa_auth_token', urlToken);
+        this.storage.setAuthToken(urlToken);
       }
 
       // /session/:code and /series/:code are handled by sessionGuard — skip
@@ -465,9 +463,7 @@ export class QaService {
         this.speakerSegmentId.set(authInfo.segmentId);
       }
 
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('live_qa_auth_token', token.trim());
-      }
+      this.storage.setAuthToken(token.trim());
 
       if (authInfo.role === 'organizer') {
         this.showToast('Authenticated as Event Organizer. Control room enabled.');
@@ -492,9 +488,7 @@ export class QaService {
     this.userAuthToken.set(null);
     this.userAuthScope.set([]);
     this.speakerSegmentId.set(null);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('live_qa_auth_token');
-    }
+    this.storage.clearAuthToken();
     this.showToast('Switched to Attendee view.');
   }
 
@@ -505,7 +499,7 @@ export class QaService {
   public loadHostedSessionHistory(): void {
     if (typeof window === 'undefined' || !window.localStorage) return;
     try {
-      const stored = localStorage.getItem('live_qa_hosted_sessions_history');
+      const stored = this.storage.getHostedSessionsHistory();
       if (stored) {
         const parsed: HostedSessionRecord[] = JSON.parse(stored);
         if (Array.isArray(parsed)) {
@@ -568,12 +562,10 @@ export class QaService {
     }
 
     this.hostedSessions.set(updated);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        localStorage.setItem('live_qa_hosted_sessions_history', JSON.stringify(updated));
-      } catch (e) {
-        console.warn('Failed to save hosted sessions to localStorage:', e);
-      }
+    try {
+      this.storage.setHostedSessionsHistory(JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Failed to save hosted sessions to localStorage:', e);
     }
   }
 
@@ -581,17 +573,13 @@ export class QaService {
     const code = joinCode.toUpperCase().trim();
     const filtered = this.hostedSessions().filter(s => s.joinCode !== code);
     this.hostedSessions.set(filtered);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('live_qa_hosted_sessions_history', JSON.stringify(filtered));
-    }
+    this.storage.setHostedSessionsHistory(JSON.stringify(filtered));
     this.showToast(`Session #${code} removed from past session history.`);
   }
 
   public clearHostedSessions(): void {
     this.hostedSessions.set([]);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('live_qa_hosted_sessions_history');
-    }
+    this.storage.clearHostedSessionsHistory();
     this.showToast('Past session history cleared.');
   }
 
@@ -599,7 +587,7 @@ export class QaService {
     if (typeof window === 'undefined' || !window.localStorage) return [];
     try {
       const code = joinCode.toUpperCase().trim();
-      const raw = localStorage.getItem(`askqlive_questions_${code}`);
+      const raw = this.storage.getCachedQuestions(code);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed;
@@ -611,10 +599,9 @@ export class QaService {
   }
 
   public saveQuestionsLocally(joinCode: string, questions: Question[]): void {
-    if (typeof window === 'undefined' || !window.localStorage) return;
     try {
       const code = joinCode.toUpperCase().trim();
-      localStorage.setItem(`askqlive_questions_${code}`, JSON.stringify(questions));
+      this.storage.setCachedQuestions(code, JSON.stringify(questions));
     } catch {
       // ignore
     }
@@ -642,9 +629,7 @@ export class QaService {
     this.userAuthScope.set(['*']);
     if (record.adminToken) {
       this.userAuthToken.set(record.adminToken);
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('live_qa_auth_token', record.adminToken);
-      }
+      this.storage.setAuthToken(record.adminToken);
     }
 
     try {
@@ -765,11 +750,9 @@ export class QaService {
     // Ensure attendee role (Zero auth required)
     this.userRole.set('attendee');
     this.userAuthToken.set(null);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.removeItem('live_qa_auth_token');
-      if (opts?.name && !opts.anonymous) {
-        localStorage.setItem('live_qa_username', opts.name.trim());
-      }
+    this.storage.clearAuthToken();
+    if (opts?.name && !opts.anonymous) {
+      this.storage.setUsername(opts.name.trim());
     }
 
     const success = await this.joinSession(code, attendeeName);
@@ -854,7 +837,7 @@ export class QaService {
 
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
-        const saved = localStorage.getItem(`askqlive_upvoted_${code}`);
+        const saved = this.storage.getUpvotedIds(code);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
@@ -869,9 +852,7 @@ export class QaService {
     try {
       if (name) {
         this.userName.set(name);
-        if (typeof window !== 'undefined' && window.localStorage) {
-          localStorage.setItem('live_qa_username', name);
-        }
+        this.storage.setUsername(name);
       }
 
       const res = await fetch(`/api/sessions/${code}/join`, {
@@ -970,8 +951,8 @@ export class QaService {
       this.userRole.set('organizer');
       this.userAuthToken.set(session.adminToken);
 
-      if (typeof window !== 'undefined' && window.localStorage && session.adminToken) {
-        localStorage.setItem('live_qa_auth_token', session.adminToken);
+      if (session.adminToken) {
+        this.storage.setAuthToken(session.adminToken);
       }
 
       // Record in Host Past Session History
@@ -1035,8 +1016,8 @@ export class QaService {
       this.userRole.set('organizer');
       this.userAuthToken.set(series.organizerToken);
 
-      if (typeof window !== 'undefined' && window.localStorage && series.organizerToken) {
-        localStorage.setItem('live_qa_auth_token', series.organizerToken);
+      if (series.organizerToken) {
+        this.storage.setAuthToken(series.organizerToken);
       }
 
       // Also load synthetic session
@@ -1444,9 +1425,7 @@ export class QaService {
     if (!invite?.joinCode || !invite.adminToken) return false;
 
     this.userAuthToken.set(invite.adminToken);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('live_qa_auth_token', invite.adminToken);
-    }
+    this.storage.setAuthToken(invite.adminToken);
 
     const ok = await this.joinSession(invite.joinCode, invite.speakerName || this.userName() || 'Speaker', {
       adminToken: invite.adminToken,
@@ -1853,15 +1832,10 @@ export class QaService {
     }
     this.userUpvotedIds.set(currentUpvoted);
 
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        localStorage.setItem(
-          `askqlive_upvoted_${code}`,
-          JSON.stringify(Array.from(currentUpvoted))
-        );
-      } catch {
-        // ignore
-      }
+    try {
+      this.storage.setUpvotedIds(code, JSON.stringify(Array.from(currentUpvoted)));
+    } catch {
+      // ignore
     }
 
     this.questions.update(list =>
