@@ -17,6 +17,7 @@ import {
   requireAuth,
   resolveAuth,
   sanitizeSeriesForPublic,
+  sanitizeSegmentForRole,
   extractBearerToken,
 } from './server/auth.js';
 import type { Series } from './app/models/qa.models.js';
@@ -350,15 +351,7 @@ app.get('/api/series/:code/segments', (req, res) => {
   const token = extractBearerToken(req);
   const auth = resolveAuth(qaStore, code, token);
 
-  const segments = series.segments.map(seg => {
-    // If organizer, or speaker of this segment, allow adminToken; otherwise strip it
-    if (auth.role === 'organizer' || (auth.role === 'speaker' && auth.scope.includes(seg.id))) {
-      return seg;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { adminToken, speakerEmail, ...safe } = seg;
-    return safe;
-  });
+  const segments = series.segments.map(seg => sanitizeSegmentForRole(seg, auth));
 
   res.json({ segments });
 });
