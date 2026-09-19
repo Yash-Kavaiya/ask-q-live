@@ -107,9 +107,6 @@ const UNAMBIGUOUS_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export class QaStore {
   private repo = new QaRepository();
-  private questions = new Map<string, Question>(); // questionId -> Question
-  private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
-  private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
   private submissionRateLimits = new Map<string, number[]>(); // `${key}:${fingerprint}` -> timestamps[]
   private auditLogs = new Map<string, AuditEntry[]>(); // seriesCode -> AuditEntry[]
   private cachedSegmentReports = new Map<string, PostSessionReport>(); // segmentId -> PostSessionReport
@@ -392,7 +389,8 @@ export class QaStore {
         },
       };
       this.repo.setSession(backingJoinCode, backingSession);
-      this.sessionQuestions.set(backingJoinCode, []);
+      // Reset (not lazy-init): a standalone session registered under this backing code may already hold questions.
+      this.repo.setQuestionIds(backingJoinCode, []);
     });
 
     const newSeries: Series = {
@@ -421,7 +419,6 @@ export class QaStore {
     };
 
     this.repo.setSeries(seriesCode, newSeries);
-    this.sessionQuestions.set(seriesCode, []);
     this.repo.initParticipants(seriesCode);
     this.repo.initSeriesParticipants(seriesCode);
     this.auditLogs.set(seriesCode, []);
@@ -598,7 +595,8 @@ export class QaStore {
       },
     };
     this.repo.setSession(backingJoinCode, backingSession);
-    this.sessionQuestions.set(backingJoinCode, []);
+    // Reset (not lazy-init): after deleteSegment, `${code}-S${order}` can collide with an existing backing session's list.
+    this.repo.setQuestionIds(backingJoinCode, []);
 
     this.logAudit({
       seriesId: series.id,
@@ -1216,11 +1214,12 @@ export class QaStore {
 
       const dedupeResult = await checkSemanticDeduplication(params.content, existingApproved);
       if (dedupeResult.isDuplicate && dedupeResult.matchedQuestionId) {
-        const parentQuestion = this.questions.get(dedupeResult.matchedQuestionId);
+        const parentQuestion = this.repo.getQuestion(dedupeResult.matchedQuestionId);
         if (parentQuestion) {
           parentQuestion.upvotes += 1;
           parentQuestion.clusterCount = (parentQuestion.clusterCount || 0) + 1;
-          this.upvoteLedger.add(`${parentQuestion.id}:${params.clientFingerprint}`);
+          this.repo.setQuestion(parentQuestion.id, parentQuestion);
+          this.repo.addUpvote(parentQuestion.id, params.clientFingerprint);
 
           return {
             deduplicatedWith: parentQuestion,
@@ -1259,12 +1258,9 @@ export class QaStore {
       updatedAt: nowIso,
     };
 
-    this.questions.set(newQuestionId, newQuestion);
-    if (!this.sessionQuestions.has(code)) {
-      this.sessionQuestions.set(code, []);
-    }
-    this.sessionQuestions.get(code)!.push(newQuestionId);
-    this.upvoteLedger.add(`${newQuestionId}:${params.clientFingerprint}`);
+    this.repo.setQuestion(newQuestionId, newQuestion);
+    this.repo.addQuestionId(code, newQuestionId);
+    this.repo.addUpvote(newQuestionId, params.clientFingerprint);
 
     // Update participant counts
     this.recordParticipantQuestion(code, params.clientFingerprint, params.authorName, targetSegment?.id);
@@ -1320,7 +1316,7 @@ export class QaStore {
     if (!series) return false;
 
     const auth = this.verifyToken(code, token);
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return false;
 
     const sourceSeg = series.segments.find(s => s.id === question.segmentId);
@@ -1344,6 +1340,7 @@ export class QaStore {
     question.segmentTitle = targetSeg.title;
     question.speakerName = targetSeg.speakerName;
     question.updatedAt = nowIso;
+    this.repo.setQuestion(questionId, question);
 
     this.logAudit({
       seriesId: series.id,
@@ -1386,11 +1383,12 @@ export class QaStore {
     const auth = this.verifyToken(code, token);
     if (auth.role !== 'organizer' && auth.role !== 'speaker') return false;
 
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return false;
 
     question.isParked = isParked;
     question.updatedAt = new Date().toISOString();
+    this.repo.setQuestion(questionId, question);
 
     this.logAudit({
       seriesId: series.id,
@@ -1552,32 +1550,33 @@ export class QaStore {
     questionId: string,
     clientFingerprint: string
   ): { upvoted: boolean; upvotes: number } | null {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return null;
 
-    const ledgerKey = `${questionId}:${clientFingerprint}`;
-    const hasVoted = this.upvoteLedger.has(ledgerKey);
+    const hasVoted = this.repo.hasUpvote(questionId, clientFingerprint);
 
     if (hasVoted) {
-      this.upvoteLedger.delete(ledgerKey);
+      this.repo.removeUpvote(questionId, clientFingerprint);
       question.upvotes = Math.max(0, question.upvotes - 1);
       question.updatedAt = new Date().toISOString();
+      this.repo.setQuestion(questionId, question);
       return { upvoted: false, upvotes: question.upvotes };
     } else {
-      this.upvoteLedger.add(ledgerKey);
+      this.repo.addUpvote(questionId, clientFingerprint);
       question.upvotes += 1;
       question.updatedAt = new Date().toISOString();
+      this.repo.setQuestion(questionId, question);
       return { upvoted: true, upvotes: question.upvotes };
     }
   }
 
   public hasUserUpvoted(questionId: string, clientFingerprint: string): boolean {
-    return this.upvoteLedger.has(`${questionId}:${clientFingerprint}`);
+    return this.repo.hasUpvote(questionId, clientFingerprint);
   }
 
   public getUserUpvotedIds(joinCode: string, clientFingerprint: string): string[] {
-    const questionIds = this.sessionQuestions.get(joinCode.toUpperCase()) || [];
-    return questionIds.filter(qId => this.upvoteLedger.has(`${qId}:${clientFingerprint}`));
+    const questionIds = this.repo.getQuestionIds(joinCode.toUpperCase());
+    return questionIds.filter(qId => this.repo.hasUpvote(qId, clientFingerprint));
   }
 
   public updateQuestionStatus(
@@ -1585,7 +1584,7 @@ export class QaStore {
     questionId: string,
     status: QuestionStatus
   ): Question | null {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return null;
     question.status = status;
     question.updatedAt = new Date().toISOString();
@@ -1608,6 +1607,7 @@ export class QaStore {
         });
     }
 
+    this.repo.setQuestion(questionId, question);
     return question;
   }
 
@@ -1617,13 +1617,14 @@ export class QaStore {
     newContent: string,
     isAdmin = false
   ): Question | null {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return null;
     if (!isAdmin && question.clientFingerprint !== clientFingerprint) {
       return null;
     }
     question.content = newContent.trim();
     question.updatedAt = new Date().toISOString();
+    this.repo.setQuestion(questionId, question);
     return question;
   }
 
@@ -1633,17 +1634,14 @@ export class QaStore {
     clientFingerprint: string,
     isAdmin = false
   ): boolean {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return false;
     if (!isAdmin && question.clientFingerprint !== clientFingerprint) {
       return false;
     }
-    this.questions.delete(questionId);
+    this.repo.deleteQuestion(questionId);
     const code = joinCode.toUpperCase();
-    const list = this.sessionQuestions.get(code);
-    if (list) {
-      this.sessionQuestions.set(code, list.filter(id => id !== questionId));
-    }
+    this.repo.setQuestionIds(code, this.repo.getQuestionIds(code).filter(id => id !== questionId));
     return true;
   }
 
@@ -1658,7 +1656,7 @@ export class QaStore {
       clientFingerprint?: string;
     }
   ): { question: Question; answer: HumanAnswer } | null {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question) return null;
 
     const answerId = 'ans-' + Math.random().toString(36).substring(2, 9);
@@ -1679,6 +1677,7 @@ export class QaStore {
     }
     question.humanAnswers.push(answer);
     question.updatedAt = nowIso;
+    this.repo.setQuestion(questionId, question);
 
     const series = this.getSeries(joinCode);
     if (series) {
@@ -1703,7 +1702,7 @@ export class QaStore {
     clientFingerprint?: string,
     isAdmin = false
   ): { question: Question } | null {
-    const question = this.questions.get(questionId);
+    const question = this.repo.getQuestion(questionId);
     if (!question || !question.humanAnswers) return null;
 
     const answerIdx = question.humanAnswers.findIndex(a => a.id === answerId);
@@ -1716,6 +1715,7 @@ export class QaStore {
 
     question.humanAnswers.splice(answerIdx, 1);
     question.updatedAt = new Date().toISOString();
+    this.repo.setQuestion(questionId, question);
 
     const series = this.getSeries(joinCode);
     if (series) {
@@ -1735,10 +1735,10 @@ export class QaStore {
 
   public getQuestions(joinCode: string, segmentId?: string): Question[] {
     const code = joinCode.toUpperCase();
-    const ids = this.sessionQuestions.get(code) || [];
+    const ids = this.repo.getQuestionIds(code);
     const result: Question[] = [];
     for (const id of ids) {
-      const q = this.questions.get(id);
+      const q = this.repo.getQuestion(id);
       if (q) {
         if (!segmentId || segmentId === 'ALL' || q.segmentId === segmentId) {
           result.push(q);
@@ -2153,9 +2153,6 @@ export class QaStore {
       },
     };
     this.repo.setSession(code, rootSession);
-    if (!this.sessionQuestions.has(code)) {
-      this.sessionQuestions.set(code, []);
-    }
     return rootSession;
   }
 
@@ -2206,7 +2203,6 @@ export class QaStore {
     };
 
     this.repo.setSession(joinCode, session);
-    this.sessionQuestions.set(joinCode, []);
     this.repo.initParticipants(joinCode);
 
     return session;
@@ -2469,7 +2465,6 @@ export class QaStore {
     };
 
     this.repo.setSeries(defaultCode, seriesNext26);
-    this.sessionQuestions.set(defaultCode, []);
     this.repo.initParticipants(defaultCode);
     this.repo.initSeriesParticipants(defaultCode);
     this.auditLogs.set(defaultCode, []);
@@ -2528,7 +2523,6 @@ export class QaStore {
         },
       };
       this.repo.setSession(backingCode, backingSession);
-      this.sessionQuestions.set(backingCode, []);
     });
 
     // Seed demo questions
@@ -2656,8 +2650,8 @@ export class QaStore {
         updatedAt: qTime,
       };
 
-      this.questions.set(question.id, question);
-      this.sessionQuestions.get(defaultCode)!.push(question.id);
+      this.repo.setQuestion(question.id, question);
+      this.repo.addQuestionId(defaultCode, question.id);
     }
 
     // =========================================================================
@@ -2810,7 +2804,6 @@ export class QaStore {
     };
 
     this.repo.setSeries(nvidiaCode, seriesNvidia);
-    this.sessionQuestions.set(nvidiaCode, []);
     this.repo.initParticipants(nvidiaCode);
     this.repo.initSeriesParticipants(nvidiaCode);
     this.auditLogs.set(nvidiaCode, []);
@@ -2867,7 +2860,6 @@ export class QaStore {
         },
       };
       this.repo.setSession(backingCode, backingSession);
-      this.sessionQuestions.set(backingCode, []);
     });
 
     const nvidiaDemoQuestions = [
@@ -2975,8 +2967,8 @@ export class QaStore {
         updatedAt: qTime,
       };
 
-      this.questions.set(question.id, question);
-      this.sessionQuestions.get(nvidiaCode)!.push(question.id);
+      this.repo.setQuestion(question.id, question);
+      this.repo.addQuestionId(nvidiaCode, question.id);
     }
 
     // =========================================================================
@@ -3108,7 +3100,6 @@ export class QaStore {
     };
 
     this.repo.setSeries(gdgCode, seriesGdgLive);
-    this.sessionQuestions.set(gdgCode, []);
     this.repo.initParticipants(gdgCode);
     this.repo.initSeriesParticipants(gdgCode);
     this.auditLogs.set(gdgCode, []);
@@ -3171,7 +3162,6 @@ export class QaStore {
         },
       };
       this.repo.setSession(backingCode, backingSession);
-      this.sessionQuestions.set(backingCode, []);
     });
 
     const gdgDemoQuestions = [
@@ -3279,13 +3269,13 @@ export class QaStore {
         updatedAt: qTime,
       };
 
-      this.questions.set(question.id, question);
-      this.sessionQuestions.get(gdgCode)!.push(question.id);
+      this.repo.setQuestion(question.id, question);
+      this.repo.addQuestionId(gdgCode, question.id);
     }
   }
 
   public async generateQuestionRagAnswer(joinCode: string, questionId: string): Promise<Question | null> {
-    const q = this.questions.get(questionId);
+    const q = this.repo.getQuestion(questionId);
     if (!q) return null;
 
     const series = this.getSeries(joinCode);
@@ -3295,6 +3285,7 @@ export class QaStore {
                           series?.segments[0];
 
     q.aiStatus = 'GENERATING';
+    this.repo.setQuestion(questionId, q);
     const eventContext = series?.contextData || series?.seriesContextData || '';
     const speakerContext = targetSegment?.groundingContext || targetSegment?.contextData || session?.contextData || '';
     const sessionTitle = targetSegment?.title || session?.title || series?.title || '';
@@ -3316,10 +3307,13 @@ export class QaStore {
       q.topSimilarity = aiResult.topSimilarity;
       q.aiStatus = 'READY';
       q.updatedAt = new Date().toISOString();
+      // The question may have been deleted while the AI call was in flight; don't resurrect it.
+      if (this.repo.getQuestion(questionId) === q) this.repo.setQuestion(questionId, q);
       return q;
     } catch (err) {
       console.error('Manual RAG generation error:', err);
       q.aiStatus = 'FAILED';
+      if (this.repo.getQuestion(questionId) === q) this.repo.setQuestion(questionId, q);
       return q;
     }
   }

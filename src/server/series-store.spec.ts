@@ -533,6 +533,257 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
     }, 15000);
   });
 
+  describe('8. Question Storage: listing, upvotes, edits, answers & deletion', () => {
+    const seededIds = ['q-demo-1', 'q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5'];
+
+    it('should list seeded questions in insertion order and return [] for an unknown code', () => {
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(seededIds);
+      expect(store.getQuestions('next26').map(q => q.id)).toEqual(seededIds);
+      expect(store.getQuestions('NOPE99', 'seg-1')).toEqual([]);
+      expect(store.getQuestions('NEXT26', 'seg-1').map(q => q.id)).toEqual(['q-demo-1', 'q-demo-2', 'q-demo-3']);
+      expect(store.getQuestions('NEXT26', 'ALL').map(q => q.id)).toEqual(seededIds);
+    });
+
+    it('should toggle an upvote on and off and reflect it in hasUserUpvoted and getUserUpvotedIds', () => {
+      const fp = 'fp-toggle-tester';
+      const before = store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.upvotes;
+
+      expect(store.hasUserUpvoted('q-demo-3', fp)).toBe(false);
+      expect(store.getUserUpvotedIds('NEXT26', fp)).toEqual([]);
+
+      expect(store.toggleUpvote('NEXT26', 'q-demo-3', fp)).toEqual({ upvoted: true, upvotes: before + 1 });
+      expect(store.hasUserUpvoted('q-demo-3', fp)).toBe(true);
+      expect(store.getUserUpvotedIds('next26', fp)).toEqual(['q-demo-3']);
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.upvotes).toBe(before + 1);
+
+      expect(store.toggleUpvote('NEXT26', 'q-demo-3', fp)).toEqual({ upvoted: false, upvotes: before });
+      expect(store.hasUserUpvoted('q-demo-3', fp)).toBe(false);
+      expect(store.getUserUpvotedIds('NEXT26', fp)).toEqual([]);
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.upvotes).toBe(before);
+    });
+
+    it('should keep upvote ledgers independent per fingerprint and per question', () => {
+      store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-a');
+      store.toggleUpvote('NEXT26', 'q-demo-4', 'fp-a');
+      store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-b');
+
+      expect(store.getUserUpvotedIds('NEXT26', 'fp-a')).toEqual(['q-demo-3', 'q-demo-4']);
+      expect(store.getUserUpvotedIds('NEXT26', 'fp-b')).toEqual(['q-demo-3']);
+      expect(store.hasUserUpvoted('q-demo-5', 'fp-a')).toBe(false);
+    });
+
+    it('should return null when toggling an upvote on an unknown question and leave the ledger untouched', () => {
+      expect(store.toggleUpvote('NEXT26', 'q-does-not-exist', 'fp-ghost')).toBeNull();
+      expect(store.hasUserUpvoted('q-does-not-exist', 'fp-ghost')).toBe(false);
+    });
+
+    it('should append a newly submitted question at the end of the list and register the author upvote', async () => {
+      const fp = 'fp-new-author';
+      const res = await store.submitQuestion({
+        joinCode: 'NEXT26',
+        clientFingerprint: fp,
+        authorName: 'New Author',
+        isAnonymous: false,
+        content: 'Will the session recordings be published after the event ends?',
+        segmentId: 'seg-1',
+      });
+
+      expect(res.question).toBeDefined();
+      const id = res.question!.id;
+      expect(res.question!.upvotes).toBe(1);
+      expect(store.hasUserUpvoted(id, fp)).toBe(true);
+      expect(store.getUserUpvotedIds('NEXT26', fp)).toEqual([id]);
+
+      const ids = store.getQuestions('NEXT26').map(q => q.id);
+      expect(ids).toEqual([...seededIds, id]);
+    }, 15000);
+
+    it('should update question status and expose it through getQuestions', () => {
+      const updated = store.updateQuestionStatus('NEXT26', 'q-demo-3', 'REJECTED');
+      expect(updated?.status).toBe('REJECTED');
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.status).toBe('REJECTED');
+
+      expect(store.updateQuestionStatus('NEXT26', 'q-does-not-exist', 'REJECTED')).toBeNull();
+    });
+
+    it('should only let the author (or an admin) edit question content and trim the new text', () => {
+      const original = store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.content;
+
+      expect(store.editQuestionContent('q-demo-3', 'fp-not-the-author', 'Hijacked text')).toBeNull();
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.content).toBe(original);
+
+      const byAuthor = store.editQuestionContent('q-demo-3', 'fp-marcus-vance', '  Edited by author  ');
+      expect(byAuthor?.content).toBe('Edited by author');
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.content).toBe('Edited by author');
+
+      const byAdmin = store.editQuestionContent('q-demo-3', 'fp-not-the-author', 'Edited by admin', true);
+      expect(byAdmin?.content).toBe('Edited by admin');
+
+      expect(store.editQuestionContent('q-does-not-exist', 'fp-x', 'nope', true)).toBeNull();
+    });
+
+    it('should add and delete human answers, enforcing ownership for non-admins', () => {
+      expect(store.addHumanAnswer('NEXT26', 'q-does-not-exist', {
+        authorName: 'Ghost', authorRole: 'attendee', content: 'nope',
+      })).toBeNull();
+
+      const added = store.addHumanAnswer('NEXT26', 'q-demo-3', {
+        authorName: 'Helpful Human',
+        authorRole: 'attendee',
+        content: 'Yes, embeddings can be cached across speakers.',
+        clientFingerprint: 'fp-helper',
+      });
+      expect(added).not.toBeNull();
+      const answerId = added!.answer.id;
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.humanAnswers?.map(a => a.id)).toEqual([answerId]);
+
+      // A different, non-admin fingerprint cannot delete it
+      expect(store.deleteHumanAnswer('NEXT26', 'q-demo-3', answerId, 'fp-someone-else')).toBeNull();
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.humanAnswers?.length).toBe(1);
+
+      // The owner can
+      const removed = store.deleteHumanAnswer('NEXT26', 'q-demo-3', answerId, 'fp-helper');
+      expect(removed?.question.humanAnswers).toEqual([]);
+      expect(store.getQuestions('NEXT26').find(q => q.id === 'q-demo-3')!.humanAnswers).toEqual([]);
+
+      // Unknown question / answer ids
+      expect(store.deleteHumanAnswer('NEXT26', 'q-does-not-exist', answerId, 'fp-helper', true)).toBeNull();
+      expect(store.deleteHumanAnswer('NEXT26', 'q-demo-3', 'ans-nope', 'fp-helper', true)).toBeNull();
+    });
+
+    it('should delete a question for its author or an admin, keep the remaining order, and free it from all lookups', () => {
+      // Non-author, non-admin cannot delete
+      expect(store.deleteQuestion('NEXT26', 'q-demo-3', 'fp-not-the-author')).toBe(false);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(seededIds);
+
+      // Admin deletes the middle question (which the fingerprint below had upvoted)
+      store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-voter');
+      store.toggleUpvote('NEXT26', 'q-demo-4', 'fp-voter');
+      expect(store.getUserUpvotedIds('NEXT26', 'fp-voter')).toEqual(['q-demo-3', 'q-demo-4']);
+      expect(store.deleteQuestion('NEXT26', 'q-demo-3', 'fp-not-the-author', true)).toBe(true);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5']);
+      // The id is dropped from the session's id list, not just hidden by the missing question
+      expect(store.getUserUpvotedIds('NEXT26', 'fp-voter')).toEqual(['q-demo-4']);
+      expect(store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-late')).toBeNull();
+      expect(store.updateQuestionStatus('NEXT26', 'q-demo-3', 'APPROVED')).toBeNull();
+      expect(store.deleteQuestion('NEXT26', 'q-demo-3', 'fp-x', true)).toBe(false);
+
+      // The author (fingerprint derived from author name) deletes their own question, lowercase code accepted
+      expect(store.deleteQuestion('next26', 'q-demo-1', 'fp-alex-rivera')).toBe(true);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-2', 'q-demo-4', 'q-demo-5']);
+    });
+
+    it('should return teleprompter questions limited to APPROVED/ANSWERING with ANSWERING first', () => {
+      const all = store.getTeleprompterQuestions('NEXT26');
+      expect(all.map(q => q.id)[0]).toBe('q-demo-2'); // the only ANSWERING question sorts first
+      expect(all.map(q => q.id).sort()).toEqual(['q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5']); // ANSWERED q-demo-1 excluded
+      all.forEach(q => expect(typeof q.decayScore).toBe('number'));
+
+      expect(store.getTeleprompterQuestions('NEXT26', 'seg-1').map(q => q.id).sort()).toEqual(['q-demo-2', 'q-demo-3']);
+
+      store.updateQuestionStatus('NEXT26', 'q-demo-3', 'REJECTED');
+      expect(store.getTeleprompterQuestions('NEXT26').map(q => q.id)).not.toContain('q-demo-3');
+      expect(store.getTeleprompterQuestions('NOPE99')).toEqual([]);
+    });
+
+    it('should compute word frequencies from stored questions and drop rejected ones', () => {
+      expect(store.getWordFrequencies('NEXT26').length).toBeGreaterThan(0);
+
+      // seg-4 holds exactly one question (q-demo-5), so its words are not truncated by the top-48 cut
+      expect(store.getWordFrequencies('NEXT26', 'seg-4').map(w => w.text)).toContain('Chunking');
+
+      store.updateQuestionStatus('NEXT26', 'q-demo-5', 'REJECTED');
+      expect(store.getWordFrequencies('NEXT26', 'seg-4')).toEqual([]);
+
+      expect(store.getWordFrequencies('NOPE99')).toEqual([]);
+    });
+
+    it('should bulk-move only existing questions and report the moved count', () => {
+      const res = store.bulkMoveQuestions('NEXT26', ['q-demo-3', 'q-does-not-exist', 'q-demo-4'], 'seg-6', 'organizer_secret_next26');
+      expect(res.movedCount).toBe(2);
+      expect(store.getQuestions('NEXT26', 'seg-6').map(q => q.id).sort()).toEqual(['q-demo-3', 'q-demo-4']);
+
+      expect(store.moveQuestion('NEXT26', 'q-does-not-exist', 'seg-6', 'organizer_secret_next26')).toBe(false);
+      expect(store.parkQuestion('NEXT26', 'q-does-not-exist', true, 'organizer_secret_next26')).toBe(false);
+    });
+
+    it('should generate a manual RAG answer on the stored question and return null for an unknown one', async () => {
+      expect(await store.generateQuestionRagAnswer('NEXT26', 'q-does-not-exist')).toBeNull();
+
+      const q = await store.generateQuestionRagAnswer('NEXT26', 'q-demo-3');
+      expect(q).not.toBeNull();
+      expect(q!.aiStatus).toBe('READY');
+      expect(q!.aiLine1).toBeTruthy();
+      const stored = store.getQuestions('NEXT26').find(item => item.id === 'q-demo-3')!;
+      expect(stored.aiStatus).toBe('READY');
+      expect(stored.aiLine1).toBe(q!.aiLine1);
+    }, 15000);
+
+    it('should NOT resurrect a question deleted while its manual RAG answer was still generating', async () => {
+      const pending = store.generateQuestionRagAnswer('NEXT26', 'q-demo-3');
+      expect(store.deleteQuestion('NEXT26', 'q-demo-3', 'fp-x', true)).toBe(true);
+      await pending;
+
+      expect(store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-late')).toBeNull();
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5']);
+    }, 15000);
+
+    it('should reset a colliding backing-session question list when addSegment reuses its code (legacy behaviour)', async () => {
+      // deleteSegment does not shrink order numbering, so addSegment (order = segments.length)
+      // can reuse an existing backing code. Its question list has always been reset on creation.
+      const series = store.createSeries({
+        title: 'Collision Workshop',
+        segments: [
+          { title: 'Talk One', speakerName: 'Speaker One', type: 'TALK' },
+          { title: 'Talk Two', speakerName: 'Speaker Two', type: 'TALK' },
+        ],
+      });
+      const token = series.organizerToken;
+      const backingTwo = `${series.seriesCode}-S2`;
+
+      const res = await store.submitQuestion({
+        joinCode: backingTwo,
+        clientFingerprint: 'fp-collision',
+        authorName: 'Collision Tester',
+        isAnonymous: false,
+        content: 'Is anything left in the backing session after a collision?',
+      });
+      expect(res.question).toBeDefined();
+      expect(store.getQuestions(backingTwo).length).toBe(1);
+
+      expect(store.deleteSegment(series.seriesCode, series.segments[1].id, token).success).toBe(true);
+      expect(store.addSegment(series.seriesCode, { title: 'Replacement Talk', speakerName: 'Speaker Three' }, token)).not.toBeNull();
+
+      // Replacement got order = segments.length = 2, so it re-registered `${code}-S2` and reset its list
+      expect(store.getSession(backingTwo)?.title).toBe('Replacement Talk');
+      expect(store.getQuestions(backingTwo)).toEqual([]);
+    }, 15000);
+
+    it('should reset a pre-existing standalone session question list when createSeries registers the same backing code (legacy behaviour)', async () => {
+      // A standalone session may legally be named like a backing code ("COLL-S1"); a later series "COLL"
+      // registers its own backing session under that code and has always started it with an empty list.
+      store.createSession({ title: 'Standalone Lookalike', customJoinCode: 'COLL-S1' });
+      const res = await store.submitQuestion({
+        joinCode: 'COLL-S1',
+        clientFingerprint: 'fp-lookalike',
+        authorName: 'Lookalike Tester',
+        isAnonymous: false,
+        content: 'Does creating a series wipe the lookalike session question list?',
+      });
+      expect(res.question).toBeDefined();
+      expect(store.getQuestions('COLL-S1').length).toBe(1);
+
+      store.createSeries({
+        title: 'Colliding Series',
+        customSeriesCode: 'COLL',
+        segments: [{ title: 'Only Talk', speakerName: 'Solo Speaker', type: 'TALK' }],
+      });
+
+      expect(store.getSession('COLL-S1')?.title).toBe('Only Talk');
+      expect(store.getQuestions('COLL-S1')).toEqual([]);
+    }, 15000);
+  });
+
   describe('Phase P1: Single-Session Executive Report Accuracy', () => {
     it('should generate a real, session-specific executive summary (not the generic fallback sentence)', async () => {
       const report = await generatePostSessionReport(

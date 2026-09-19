@@ -1,10 +1,13 @@
-import { Session, Participant, Series, SeriesParticipant } from '../app/models/qa.models.js';
+import { Session, Participant, Series, SeriesParticipant, Question } from '../app/models/qa.models.js';
 
 export class QaRepository {
   private sessions = new Map<string, Session>();
   private participants = new Map<string, Map<string, Participant>>();
   private series = new Map<string, Series>();
   private seriesParticipants = new Map<string, Map<string, SeriesParticipant>>();
+  private questions = new Map<string, Question>(); // questionId -> Question
+  private sessionQuestions = new Map<string, string[]>(); // joinCode -> questionId[]
+  private upvoteLedger = new Set<string>(); // `${questionId}:${clientFingerprint}`
 
   getSession(joinCode: string): Session | undefined {
     return this.sessions.get(joinCode);
@@ -100,5 +103,50 @@ export class QaRepository {
 
   hasSeriesParticipants(seriesCode: string): boolean {
     return this.seriesParticipants.has(seriesCode);
+  }
+
+  getQuestion(id: string): Question | undefined {
+    return this.questions.get(id);
+  }
+
+  setQuestion(id: string, question: Question): void {
+    this.questions.set(id, question);
+  }
+
+  deleteQuestion(id: string): void {
+    this.questions.delete(id);
+  }
+
+  getQuestionIds(joinCode: string): string[] {
+    return this.sessionQuestions.get(joinCode) || [];
+  }
+
+  addQuestionId(joinCode: string, questionId: string): void {
+    const list = this.sessionQuestions.get(joinCode);
+    if (list) {
+      list.push(questionId);
+    } else {
+      this.sessionQuestions.set(joinCode, [questionId]);
+    }
+  }
+
+  setQuestionIds(joinCode: string, ids: string[]): void {
+    this.sessionQuestions.set(joinCode, ids);
+  }
+
+  private upvoteKey(questionId: string, fingerprint: string): string {
+    return `${questionId}:${fingerprint}`;
+  }
+
+  hasUpvote(questionId: string, fingerprint: string): boolean {
+    return this.upvoteLedger.has(this.upvoteKey(questionId, fingerprint));
+  }
+
+  addUpvote(questionId: string, fingerprint: string): void {
+    this.upvoteLedger.add(this.upvoteKey(questionId, fingerprint));
+  }
+
+  removeUpvote(questionId: string, fingerprint: string): void {
+    this.upvoteLedger.delete(this.upvoteKey(questionId, fingerprint));
   }
 }

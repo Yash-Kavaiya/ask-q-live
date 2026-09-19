@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { QaRepository } from './qa-repository.js';
-import type { Session, Participant, Series, SeriesParticipant } from '../app/models/qa.models.js';
+import type { Session, Participant, Series, SeriesParticipant, Question } from '../app/models/qa.models.js';
 
 describe('QaRepository: sessions & participants', () => {
   let repo: QaRepository;
@@ -142,5 +142,64 @@ describe('QaRepository: series & seriesParticipants', () => {
     expect(repo.hasParticipants('NEXT26')).toBe(false);
     repo.initParticipants('ROOM1');
     expect(repo.hasSeriesParticipants('ROOM1')).toBe(false);
+  });
+});
+
+describe('QaRepository: questions, sessionQuestions & upvoteLedger', () => {
+  let repo: QaRepository;
+
+  beforeEach(() => {
+    repo = new QaRepository();
+  });
+
+  it('stores, retrieves, and deletes a question by id', () => {
+    const q = { id: 'q1', content: 'Why?' } as Question;
+    repo.setQuestion('q1', q);
+    expect(repo.getQuestion('q1')).toBe(q);
+    repo.deleteQuestion('q1');
+    expect(repo.getQuestion('q1')).toBeUndefined();
+  });
+
+  it('lazily creates the question-id list on first add', () => {
+    repo.addQuestionId('ABC', 'q1');
+    repo.addQuestionId('ABC', 'q2');
+    expect(repo.getQuestionIds('ABC')).toEqual(['q1', 'q2']);
+  });
+
+  it('returns an empty list for a code that has no question ids', () => {
+    expect(repo.getQuestionIds('NEVER-SEEN')).toEqual([]);
+  });
+
+  it('overwrites the question-id list with setQuestionIds', () => {
+    repo.addQuestionId('ABC', 'q1');
+    repo.setQuestionIds('ABC', ['q2', 'q3']);
+    expect(repo.getQuestionIds('ABC')).toEqual(['q2', 'q3']);
+  });
+
+  it('setQuestionIds with an empty list resets a non-empty list', () => {
+    repo.addQuestionId('ABC', 'q1');
+    repo.setQuestionIds('ABC', []);
+    expect(repo.getQuestionIds('ABC')).toEqual([]);
+  });
+
+  it('keeps question-id lists separate per join code', () => {
+    repo.addQuestionId('ABC', 'q1');
+    repo.addQuestionId('XYZ', 'q2');
+    expect(repo.getQuestionIds('ABC')).toEqual(['q1']);
+    expect(repo.getQuestionIds('XYZ')).toEqual(['q2']);
+  });
+
+  it('tracks upvotes per question+fingerprint pair', () => {
+    expect(repo.hasUpvote('q1', 'fp1')).toBe(false);
+    repo.addUpvote('q1', 'fp1');
+    expect(repo.hasUpvote('q1', 'fp1')).toBe(true);
+    repo.removeUpvote('q1', 'fp1');
+    expect(repo.hasUpvote('q1', 'fp1')).toBe(false);
+  });
+
+  it('does not conflate upvotes across different questions or fingerprints', () => {
+    repo.addUpvote('q1', 'fp1');
+    expect(repo.hasUpvote('q1', 'fp2')).toBe(false);
+    expect(repo.hasUpvote('q2', 'fp1')).toBe(false);
   });
 });
