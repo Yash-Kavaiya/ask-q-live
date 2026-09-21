@@ -41,6 +41,7 @@ import {
   speakerInviteDocId,
   toFirestoreSegment,
   toFirestoreSeries,
+  FirestoreSegmentDoc,
   FirestoreSeriesDoc,
   FirestoreSpeakerInviteClaim,
 } from './firestore-series.mapper';
@@ -702,33 +703,16 @@ export class FirebaseService {
 
       batch.set(seriesRef, seriesDoc, { merge: true });
 
+      const claims: FirestoreSpeakerInviteClaim[] = [];
       for (const seg of series.segments || []) {
         const segDoc = toFirestoreSegment({ id: series.id, joinCode }, seg, nowIso);
         const segRef = doc(this.db, 'series', joinCode, 'segments', seg.id);
         batch.set(segRef, segDoc, { merge: true });
 
         if (segDoc.speaker.email) {
-          const inviteRef = doc(
-            this.db,
-            'speakerInvites',
-            normalizeInviteEmail(segDoc.speaker.email),
-            'claims',
-            speakerInviteDocId(joinCode, seg.id)
+          claims.push(
+            this.buildInviteClaim(joinCode, seriesDoc.title, seriesDoc.state, seg, segDoc, nowIso)
           );
-          const claim: FirestoreSpeakerInviteClaim = {
-            joinCode,
-            seriesTitle: seriesDoc.title,
-            seriesState: seriesDoc.state,
-            segmentId: seg.id,
-            segmentTitle: segDoc.title,
-            speakerName: segDoc.speaker.name,
-            speakerEmail: segDoc.speaker.email,
-            adminToken: clean(seg.adminToken),
-            status: segDoc.status,
-            order: segDoc.order,
-            updatedAt: nowIso,
-          };
-          batch.set(inviteRef, claim, { merge: true });
         }
       }
 
@@ -751,6 +735,7 @@ export class FirebaseService {
       );
 
       await batch.commit();
+      await this.writeSpeakerInviteClaims(claims);
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Firestore syncSeries failed';
@@ -783,41 +768,74 @@ export class FirebaseService {
         { merge: true }
       );
 
-      const email = segDoc.speaker.email;
-      if (email) {
-        const claim: FirestoreSpeakerInviteClaim = {
-          joinCode,
-          seriesTitle: series.title || joinCode,
-          seriesState: series.state || 'SCHEDULED',
-          segmentId: seg.id,
-          segmentTitle: segDoc.title,
-          speakerName: segDoc.speaker.name,
-          speakerEmail: email,
-          adminToken: clean(seg.adminToken),
-          status: segDoc.status,
-          order: segDoc.order,
-          updatedAt: nowIso,
-        };
-        batch.set(
-          doc(
-            this.db,
-            'speakerInvites',
-            normalizeInviteEmail(email),
-            'claims',
-            speakerInviteDocId(joinCode, seg.id)
-          ),
-          claim,
-          { merge: true }
-        );
-      }
-
       await batch.commit();
+
+      if (segDoc.speaker.email) {
+        const claim = this.buildInviteClaim(
+          joinCode,
+          series.title || joinCode,
+          series.state || 'SCHEDULED',
+          seg,
+          segDoc,
+          nowIso
+        );
+        await this.writeSpeakerInviteClaims([claim]);
+      }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Firestore syncSegment failed';
       console.warn('Firestore syncSegment note:', err);
       this.lastError.set(message);
       return false;
+    }
+  }
+
+  private buildInviteClaim(
+    joinCode: string,
+    seriesTitle: string,
+    seriesState: string,
+    seg: Segment,
+    segDoc: FirestoreSegmentDoc,
+    nowIso: string
+  ): FirestoreSpeakerInviteClaim {
+    return {
+      joinCode,
+      seriesTitle,
+      seriesState,
+      segmentId: seg.id,
+      segmentTitle: segDoc.title,
+      speakerName: segDoc.speaker.name,
+      speakerEmail: segDoc.speaker.email,
+      adminToken: clean(seg.adminToken),
+      status: segDoc.status,
+      order: segDoc.order,
+      updatedAt: nowIso,
+    };
+  }
+
+  /**
+   * Best-effort and deliberately outside the main sync batch: claim writes
+   * need a real signed-in account (see firestore.rules), so an anonymous
+   * speaker-link session editing its own talk is denied here. That must not
+   * fail the series/segment write that already succeeded.
+   */
+  private async writeSpeakerInviteClaims(claims: FirestoreSpeakerInviteClaim[]): Promise<void> {
+    if (!this.db || claims.length === 0) return;
+    try {
+      const batch = writeBatch(this.db);
+      for (const claim of claims) {
+        const ref = doc(
+          this.db,
+          'speakerInvites',
+          normalizeInviteEmail(claim.speakerEmail),
+          'claims',
+          speakerInviteDocId(claim.joinCode, claim.segmentId)
+        );
+        batch.set(ref, claim, { merge: true });
+      }
+      await batch.commit();
+    } catch (err) {
+      console.warn('Firestore speaker invite claim note:', err);
     }
   }
 
