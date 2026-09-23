@@ -561,7 +561,7 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
   });
 
   describe('8. Question Storage: listing, upvotes, edits, answers & deletion', () => {
-    const seededIds = ['q-demo-1', 'q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5'];
+    const seededIds = ['q-demo-1', 'q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5', 'q-demo-6', 'q-demo-7', 'q-demo-8'];
 
     it('should list seeded questions in insertion order and return [] for an unknown code', () => {
       expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(seededIds);
@@ -688,7 +688,9 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       store.toggleUpvote('NEXT26', 'q-demo-4', 'fp-voter');
       expect(store.getUserUpvotedIds('NEXT26', 'fp-voter')).toEqual(['q-demo-3', 'q-demo-4']);
       expect(store.deleteQuestion('NEXT26', 'q-demo-3', 'fp-not-the-author', true)).toBe(true);
-      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5']);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual([
+        'q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5', 'q-demo-6', 'q-demo-7', 'q-demo-8',
+      ]);
       // The id is dropped from the session's id list, not just hidden by the missing question
       expect(store.getUserUpvotedIds('NEXT26', 'fp-voter')).toEqual(['q-demo-4']);
       expect(store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-late')).toBeNull();
@@ -697,13 +699,17 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
 
       // The author (fingerprint derived from author name) deletes their own question, lowercase code accepted
       expect(store.deleteQuestion('next26', 'q-demo-1', 'fp-alex-rivera')).toBe(true);
-      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-2', 'q-demo-4', 'q-demo-5']);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual([
+        'q-demo-2', 'q-demo-4', 'q-demo-5', 'q-demo-6', 'q-demo-7', 'q-demo-8',
+      ]);
     });
 
     it('should return teleprompter questions limited to APPROVED/ANSWERING with ANSWERING first', () => {
       const all = store.getTeleprompterQuestions('NEXT26');
       expect(all.map(q => q.id)[0]).toBe('q-demo-2'); // the only ANSWERING question sorts first
-      expect(all.map(q => q.id).sort()).toEqual(['q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5']); // ANSWERED q-demo-1 excluded
+      expect(all.map(q => q.id).sort()).toEqual([
+        'q-demo-2', 'q-demo-3', 'q-demo-4', 'q-demo-5', 'q-demo-6', 'q-demo-7', 'q-demo-8',
+      ]); // ANSWERED q-demo-1 excluded
       all.forEach(q => expect(typeof q.decayScore).toBe('number'));
 
       expect(store.getTeleprompterQuestions('NEXT26', 'seg-1').map(q => q.id).sort()).toEqual(['q-demo-2', 'q-demo-3']);
@@ -717,7 +723,7 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       expect(store.getWordFrequencies('NEXT26').length).toBeGreaterThan(0);
 
       // seg-4 holds exactly one question (q-demo-5), so its words are not truncated by the top-48 cut
-      expect(store.getWordFrequencies('NEXT26', 'seg-4').map(w => w.text)).toContain('Chunking');
+      expect(store.getWordFrequencies('NEXT26', 'seg-4').map(w => w.text)).toContain('Hallucination');
 
       store.updateQuestionStatus('NEXT26', 'q-demo-5', 'REJECTED');
       expect(store.getWordFrequencies('NEXT26', 'seg-4')).toEqual([]);
@@ -728,7 +734,9 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
     it('should bulk-move only existing questions and report the moved count', () => {
       const res = store.bulkMoveQuestions('NEXT26', ['q-demo-3', 'q-does-not-exist', 'q-demo-4'], 'seg-6', 'organizer_secret_next26');
       expect(res.movedCount).toBe(2);
-      expect(store.getQuestions('NEXT26', 'seg-6').map(q => q.id).sort()).toEqual(['q-demo-3', 'q-demo-4']);
+      expect(store.getQuestions('NEXT26', 'seg-6').map(q => q.id).sort()).toEqual([
+        'q-demo-3', 'q-demo-4', 'q-demo-8',
+      ]);
 
       expect(store.moveQuestion('NEXT26', 'q-does-not-exist', 'seg-6', 'organizer_secret_next26')).toBe(false);
       expect(store.parkQuestion('NEXT26', 'q-does-not-exist', true, 'organizer_secret_next26')).toBe(false);
@@ -752,7 +760,9 @@ Workloads run on Cloud Run with automatic horizontal pod autoscaling.`;
       await pending;
 
       expect(store.toggleUpvote('NEXT26', 'q-demo-3', 'fp-late')).toBeNull();
-      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual(['q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5']);
+      expect(store.getQuestions('NEXT26').map(q => q.id)).toEqual([
+        'q-demo-1', 'q-demo-2', 'q-demo-4', 'q-demo-5', 'q-demo-6', 'q-demo-7', 'q-demo-8',
+      ]);
     }, 15000);
 
     it('should reset a colliding backing-session question list when addSegment reuses its code (legacy behaviour)', async () => {

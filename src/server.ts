@@ -36,7 +36,10 @@ try {
 const browserDistFolder = join(import.meta.dirname, '../browser');
 
 const app = express();
-const qaStore = new QaStore(false, { repo: new QaRepository(), ai: geminiAiGateway });
+const qaStore = new QaStore(process.env['SEED_DEMO_SESSIONS'] !== 'false', {
+  repo: new QaRepository(),
+  ai: geminiAiGateway,
+});
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: [
     'localhost', 'localhost:4000', 'localhost:3000', '127.0.0.1', '127.0.0.1:4000', '0.0.0.0',

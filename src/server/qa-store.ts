@@ -22,6 +22,7 @@ import {
   HumanAnswer,
   UserRole,
 } from '../app/models/qa.models.js';
+import { buildNext26Segments, NEXT26_DEMO_SPEAKERS } from './demo-next26-segments.js';
 import { isPlausibleApiKey } from './api-key.js';
 import { timingSafeCompare } from './auth.js';
 import { QaRepository } from './qa-repository.js';
@@ -2536,177 +2537,30 @@ export class QaStore {
   }
 
   /**
-   * Seeds demo 6-speaker series and standalone keynote session (NEXT26)
+   * Seeds demo 8-speaker series and standalone keynote session (NEXT26)
    */
   private seedDefaultSessions() {
     const defaultCode = 'NEXT26';
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
 
-    // 6-Segment Run of Show for Google Cloud Next 2026 Workshop
-    const segments: Segment[] = [
-      {
-        id: 'seg-1',
-        seriesId: 'series-next26',
-        title: 'Keynote: Multimodal AI & Live Interaction Systems',
-        speakerName: 'Dr. Sundar Varma',
-        speakerRole: 'VP of Machine Learning & Live Systems, Google DeepMind',
-        speakerBio: 'Leading research on low-latency multimodal LLMs and real-time interactive voice & teleprompter synthesis.',
-        speakerAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        type: 'TALK',
-        status: 'LIVE',
-        state: 'LIVE',
-        startTime: '09:00',
-        scheduledStart: new Date(now - 1000 * 60 * 30).toISOString(),
-        scheduledDurationMinutes: 50,
-        durationMinutes: 50,
-        actualStartTime: new Date(now - 1000 * 60 * 25).toISOString(),
-        actualStart: new Date(now - 1000 * 60 * 25).toISOString(),
-        order: 1,
-        adminToken: 'speaker_token_sundar',
-        graceWindowMinutes: 10,
-        categories: ['Architecture', 'Gemini AI', 'Performance', 'Security', 'Telemetry'],
-        groundingContext: `Dr. Sundar Varma Keynote Context:
-- Gemini 2.5 Flash / Gemini 3.7 Flash: Sub-second inference time with strict JSON responseSchema validation.
-- Real-time live Q&A architecture: Uses Redis caching, WebSocket message propagation, and PostgreSQL persistence.
-- Automated Content Moderation: Low-latency classification for spam, toxicity, and irrelevant inquiries.
-- Semantic Clustering: Uses cosine similarity over text embeddings (threshold 0.88) to group duplicate audience questions and merge upvote momentum.
-- Teleprompter Scoring: Score(q) = (U_q - 1) / (T_now - T_sub + 2)^1.5, prioritizing high-velocity trending inquiries.
-- Client-side Auditory Synthesis: Offloads speech generation to the browser-native Web Speech API, eliminating third-party streaming latency.`,
-      },
-      {
-        id: 'seg-2',
-        seriesId: 'series-next26',
-        title: 'Low-Latency Inference & Edge Caching Architecture',
-        speakerName: 'Maya Chen',
-        speakerRole: 'Principal Cloud Systems Architect',
-        speakerBio: 'Specializes in distributed edge runtimes, Cloud Run microVM scaling, and sub-10ms cache hierarchies.',
-        speakerAvatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-        type: 'TALK',
-        status: 'SCHEDULED',
-        state: 'SCHEDULED',
-        startTime: '10:00',
-        scheduledStart: new Date(now + 1000 * 60 * 30).toISOString(),
-        scheduledDurationMinutes: 45,
-        durationMinutes: 45,
-        order: 2,
-        adminToken: 'speaker_token_maya',
-        graceWindowMinutes: 10,
-        categories: ['Edge Workers', 'Caching', 'Latency', 'Redis', 'CDN'],
-        groundingContext: `Maya Chen - Edge Architecture Context:
-- Edge Cache Architecture: Anycast routing via Cloud CDN with tier-1 edge POPs caching AI answers with 30s TTL.
-- MicroVM Provisioning: Scale-to-zero containers achieve <250ms cold-start latency through snapshot memory hydration.
-- WebSocket Broadcast: Epoll-driven non-blocking pub/sub multiplexers handling 100,000 concurrent listeners per regional cluster.
-- Failover Protocol: Automatic DNS health-check failover to secondary continent cluster within 1.2 seconds.`,
-      },
-      {
-        id: 'seg-3',
-        seriesId: 'series-next26',
-        title: 'Mid-Morning Break & Sponsor Showcase',
-        speakerName: 'Workshop MC',
-        speakerRole: 'Community Lead',
-        type: 'BREAK',
-        status: 'SCHEDULED',
-        state: 'SCHEDULED',
-        startTime: '10:45',
-        scheduledStart: new Date(now + 1000 * 60 * 75).toISOString(),
-        scheduledDurationMinutes: 15,
-        durationMinutes: 15,
-        order: 3,
-        adminToken: 'speaker_token_break',
-        graceWindowMinutes: 5,
-        categories: ['Networking', 'General', 'Community'],
-        groundingContext: `Break & Community Hub:
-- Coffee stations and partner lounges located on Level 2 Promenade.
-- Lightning demos in Hall B: Vertex AI Model Garden & Cloud Workstations.
-- Submit questions ahead for Dr. Elena Rostova and Devon Takahashi during this break!`,
-      },
-      {
-        id: 'seg-4',
-        seriesId: 'series-next26',
-        title: 'Zero-Hallucination Grounding with Dynamic Vector Contexts',
-        speakerName: 'Dr. Elena Rostova',
-        speakerRole: 'Head of Applied AI Research',
-        speakerBio: 'Author of landmark papers on structured RAG orchestration and real-time knowledge injection in LLMs.',
-        speakerAvatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80',
-        type: 'TALK',
-        status: 'SCHEDULED',
-        state: 'SCHEDULED',
-        startTime: '11:00',
-        scheduledStart: new Date(now + 1000 * 60 * 90).toISOString(),
-        scheduledDurationMinutes: 45,
-        durationMinutes: 45,
-        order: 4,
-        adminToken: 'speaker_token_elena',
-        graceWindowMinutes: 10,
-        categories: ['Grounding', 'Vector Search', 'Hallucination Mitigation', 'Embeddings'],
-        groundingContext: `Dr. Elena Rostova - Dynamic Vector Grounding:
-- Structured RAG Pipelines: Dynamic chunk retrieval with hybrid BM25 + dense neural embedding ranking.
-- Context Compression: Redundant token stripping achieves 60% context reduction without accuracy degradation.
-- Real-time Citation Injection: Every two-line AI answer references verified document spans with confidence telemetry.`,
-      },
-      {
-        id: 'seg-5',
-        seriesId: 'series-next26',
-        title: 'Hardening Real-Time Systems: Threat Modeling & Rate Limiting',
-        speakerName: 'Devon Takahashi',
-        speakerRole: 'Director of Infrastructure Security',
-        speakerBio: 'Former red-team lead specializing in WebSocket DDoS defense, fingerprint rotation attacks, and prompt injection mitigation.',
-        speakerAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        type: 'TALK',
-        status: 'SCHEDULED',
-        state: 'SCHEDULED',
-        startTime: '11:45',
-        scheduledStart: new Date(now + 1000 * 60 * 135).toISOString(),
-        scheduledDurationMinutes: 45,
-        durationMinutes: 45,
-        order: 5,
-        adminToken: 'speaker_token_devon',
-        graceWindowMinutes: 10,
-        categories: ['Security', 'Rate Limiting', 'Prompt Injection', 'Authentication'],
-        groundingContext: `Devon Takahashi - Live Security Architecture:
-- Prompt Injection Defense: Secondary LLM guardrails classify input adversarial intent before context inclusion.
-- Token Bucket Rate Limiting: 5 submissions/min sliding window combined with IP/Fingerprint velocity tracking.
-- Client Fingerprinting: Canvas + WebGL + hardware fingerprinting prevents sybil voting spam with zero cookie dependency.`,
-      },
-      {
-        id: 'seg-6',
-        seriesId: 'series-next26',
-        title: 'Executive Panel: The Future of Live Interactive AI Systems',
-        speakerName: 'All Speakers & Guest Executives',
-        speakerRole: 'Panel Moderator: Sarah Jenkins, Tech Journalist',
-        speakerBio: 'Open 45-minute interactive panel tackling top audience questions across all morning sessions.',
-        speakerAvatar: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=150&auto=format&fit=crop&q=80',
-        type: 'PANEL',
-        status: 'SCHEDULED',
-        state: 'SCHEDULED',
-        startTime: '12:30',
-        scheduledStart: new Date(now + 1000 * 60 * 180).toISOString(),
-        scheduledDurationMinutes: 50,
-        durationMinutes: 50,
-        order: 6,
-        adminToken: 'speaker_token_panel',
-        graceWindowMinutes: 15,
-        categories: ['Executive Strategy', 'Future of AI', 'Panel', 'Q&A'],
-        groundingContext: `Executive Panel Combined Context:
-- Synthesizing themes from Morning Keynote, Edge Caching, Dynamic Grounding, and Security Hardening.
-- Answering carried-over parking-lot questions with high audience upvote momentum from prior segments.`,
-      },
-    ];
+    // 8-speaker Run of Show for Google Cloud Next 2026 Workshop
+    const segments: Segment[] = buildNext26Segments('series-next26', now);
 
     const seriesNext26: Series = {
       id: 'series-next26',
       seriesCode: defaultCode,
       joinCode: defaultCode,
       title: 'Google Cloud Next 2026: Live Interactive Q&A Workshop Series',
-      description: 'Full-day multi-speaker workshop on real-time systems, low-latency AI orchestration, edge caching, and live teleprompter synthesis.',
+      description: 'Full-day multi-speaker workshop with 8 featured talks — real-time systems, grounding, security, analytics, and mobile live Q&A.',
       contextData: `Google Cloud Next 2026 General Workshop Context:
 - Venue: Moscone Center West & Global Live Stream
-- Format: 6-hour interactive workshop with 6 featured technical segments
-- Platform: AskQlive real-time interactive audience engagement system`,
+- Format: Interactive workshop with ${NEXT26_DEMO_SPEAKERS.length} featured technical speakers
+- Platform: AskQlive real-time interactive audience engagement system
+- Demo speaker emails: ${NEXT26_DEMO_SPEAKERS.map((s) => s.email).join(', ')}`,
       seriesContextData: `Google Cloud Next 2026 General Workshop Context:
 - Venue: Moscone Center West & Global Live Stream
-- Format: 6-hour interactive workshop with 6 featured technical segments
+- Format: Interactive workshop with ${NEXT26_DEMO_SPEAKERS.length} featured technical speakers
 - Platform: AskQlive real-time interactive audience engagement system`,
       startDate: nowIso.split('T')[0],
       date: nowIso.split('T')[0],
@@ -2797,13 +2651,13 @@ export class QaStore {
       this.repo.setSession(backingCode, backingSession);
     });
 
-    // Seed demo questions
+    // Seed demo questions across multiple speakers
     const demoQuestions = [
       {
         id: 'q-demo-1',
         segmentId: 'seg-1',
-        segmentTitle: 'Keynote: Multimodal AI & Live Interaction Systems',
-        speakerName: 'Dr. Sundar Varma',
+        segmentTitle: segments[0].title,
+        speakerName: segments[0].speakerName,
         authorName: 'Alex Rivera',
         isAnonymous: false,
         content: 'How does the teleprompter scoring algorithm prevent stale highly-upvoted questions from starving newly asked trending inquiries during a live keynote?',
@@ -2821,13 +2675,13 @@ export class QaStore {
       {
         id: 'q-demo-2',
         segmentId: 'seg-1',
-        segmentTitle: 'Keynote: Multimodal AI & Live Interaction Systems',
-        speakerName: 'Dr. Sundar Varma',
+        segmentTitle: segments[0].title,
+        speakerName: segments[0].speakerName,
         authorName: 'Priya Patel',
         isAnonymous: false,
-        content: 'What is the benchmark sub-second latency for Gemini 2.5 Flash when generating structured two-line JSON answers during peak concurrency?',
+        content: 'What is the benchmark sub-second latency for Gemini Flash when generating structured two-line JSON answers during peak concurrency?',
         category: 'Gemini AI',
-        aiLine1: 'Gemini 2.5 Flash achieves median latency under 450ms using strict responseSchema validation and edge POP routing.',
+        aiLine1: 'Gemini Flash achieves median latency under 450ms using strict responseSchema validation and edge POP routing.',
         aiLine2: 'Context caching further drops TTFT (Time to First Token) by up to 70% across repeated sessions.',
         aiConfidence: 0.94,
         aiStatus: 'READY' as const,
@@ -2840,11 +2694,11 @@ export class QaStore {
       {
         id: 'q-demo-3',
         segmentId: 'seg-1',
-        segmentTitle: 'Keynote: Multimodal AI & Live Interaction Systems',
-        speakerName: 'Dr. Sundar Varma',
+        segmentTitle: segments[0].title,
+        speakerName: segments[0].speakerName,
         authorName: 'Marcus Vance',
         isAnonymous: true,
-        content: 'Can audience question embeddings be cached across speakers to cluster related topics across the entire 6-hour event?',
+        content: 'Can audience question embeddings be cached across speakers to cluster related topics across the entire workshop?',
         category: 'Architecture',
         aiLine1: 'Yes, question embeddings are indexed in real-time with cosine similarity thresholding at 0.88.',
         aiLine2: 'This enables both per-speaker deduplication and cross-talk topic trend synthesis in executive reporting.',
@@ -2859,8 +2713,8 @@ export class QaStore {
       {
         id: 'q-demo-4',
         segmentId: 'seg-2',
-        segmentTitle: 'Low-Latency Inference & Edge Caching Architecture',
-        speakerName: 'Maya Chen',
+        segmentTitle: segments[1].title,
+        speakerName: segments[1].speakerName,
         authorName: 'David Kim',
         isAnonymous: false,
         content: 'Pre-submitting for Maya: How does Cloud CDN handle TTL invalidation when a speaker live-edits their grounding context mid-talk?',
@@ -2878,21 +2732,78 @@ export class QaStore {
       {
         id: 'q-demo-5',
         segmentId: 'seg-4',
-        segmentTitle: 'Zero-Hallucination Grounding with Dynamic Vector Contexts',
-        speakerName: 'Dr. Elena Rostova',
+        segmentTitle: segments[3].title,
+        speakerName: segments[3].speakerName,
         authorName: 'Sarah Lin',
         isAnonymous: false,
-        content: 'Pre-submitting for Elena: What is the optimal chunking window for real-time live speaker transcripts in dynamic RAG?',
+        content: 'How do you guarantee zero hallucination when the grounding deck is incomplete for a niche audience question?',
         category: 'Grounding',
-        aiLine1: 'A rolling 300-token semantic chunk window with 50-token overlap balances low-latency lookup with contextual completeness.',
-        aiLine2: 'Dynamic hybrid ranking filters noise from spoken speech before LLM injection.',
+        aiLine1: 'When retrieval confidence is low, Gemini returns an explicit incomplete-confidence caveat instead of inventing specs.',
+        aiLine2: 'Organizers can append slides mid-session; new chunks are indexed within seconds for subsequent answers.',
         aiConfidence: 0.91,
+        aiStatus: 'READY' as const,
+        upvotes: 22,
+        isSpam: false,
+        status: 'APPROVED' as QuestionStatus,
+        sentimentScore: 0.7,
+        minutesAgo: 3,
+      },
+      {
+        id: 'q-demo-6',
+        segmentId: 'seg-3',
+        segmentTitle: segments[2].title,
+        speakerName: segments[2].speakerName,
+        authorName: 'Nina Ortiz',
+        isAnonymous: false,
+        content: 'Jordan: how do speaker Gmail invites work for green-room login without giving organizers a shared password?',
+        category: 'Auth',
+        aiLine1: 'Each talk stores a speakerEmail + unique adminToken; signing in as Speaker loads invites for that Gmail.',
+        aiLine2: 'The invite claim swaps the UI into speaker scope for that segment only — same staff portal path moderators use.',
+        aiConfidence: 0.93,
+        aiStatus: 'READY' as const,
+        upvotes: 17,
+        isSpam: false,
+        status: 'APPROVED' as QuestionStatus,
+        sentimentScore: 0.8,
+        minutesAgo: 2,
+      },
+      {
+        id: 'q-demo-7',
+        segmentId: 'seg-5',
+        segmentTitle: segments[4].title,
+        speakerName: segments[4].speakerName,
+        authorName: 'Chris Park',
+        isAnonymous: false,
+        content: 'What rate limit applies when an attacker rotates fingerprints mid-keynote?',
+        category: 'Security',
+        aiLine1: 'Per-fingerprint and per-IP token buckets both apply; velocity spikes trip temporary bans.',
+        aiLine2: 'Prompt-injection classifiers run before grounding context is expanded.',
+        aiConfidence: 0.9,
+        aiStatus: 'READY' as const,
+        upvotes: 11,
+        isSpam: false,
+        status: 'APPROVED' as QuestionStatus,
+        sentimentScore: 0.55,
+        minutesAgo: 1,
+      },
+      {
+        id: 'q-demo-8',
+        segmentId: 'seg-6',
+        segmentTitle: segments[5].title,
+        speakerName: segments[5].speakerName,
+        authorName: 'Olivia Cho',
+        isAnonymous: false,
+        content: 'Can organizers export a cross-speaker heatmap of unanswered high-upvote questions at lunch?',
+        category: 'Analytics',
+        aiLine1: 'Yes — the executive report aggregates unanswered questions by segment with upvote velocity.',
+        aiLine2: 'Exports support PDF, CSV, and Markdown for post-event follow-up.',
+        aiConfidence: 0.88,
         aiStatus: 'READY' as const,
         upvotes: 9,
         isSpam: false,
         status: 'APPROVED' as QuestionStatus,
-        sentimentScore: 0.78,
-        minutesAgo: 3,
+        sentimentScore: 0.72,
+        minutesAgo: 1,
       },
     ];
 
@@ -2950,6 +2861,7 @@ export class QaStore {
         actualStart: new Date(now - 1000 * 60 * 18).toISOString(),
         order: 1,
         adminToken: 'speaker_token_jensen',
+        speakerEmail: 'jensen.huang@askqlive.demo',
         graceWindowMinutes: 15,
         categories: ['Blackwell', 'Generative AI', 'NVLink', 'Inference', 'Physical AI'],
         groundingContext: `Jensen Huang Keynote Context:
@@ -2976,6 +2888,7 @@ export class QaStore {
         durationMinutes: 45,
         order: 2,
         adminToken: 'speaker_token_ian',
+        speakerEmail: 'ian.buck@askqlive.demo',
         graceWindowMinutes: 10,
         categories: ['NIM Microservices', 'CUDA', 'TensorRT-LLM', 'Enterprise AI'],
         groundingContext: `Ian Buck - NIM Architecture Context:
@@ -3000,6 +2913,7 @@ export class QaStore {
         durationMinutes: 45,
         order: 3,
         adminToken: 'speaker_token_rev',
+        speakerEmail: 'rev.lebaredian@askqlive.demo',
         graceWindowMinutes: 10,
         categories: ['Omniverse', 'Robotics', 'GR00T', 'Digital Twins', 'PhysX'],
         groundingContext: `Rev Lebaredian - Omniverse & GR00T Context:
@@ -3024,6 +2938,7 @@ export class QaStore {
         durationMinutes: 45,
         order: 4,
         adminToken: 'speaker_token_nvidia_panel',
+        speakerEmail: 'nvidia.panel@askqlive.demo',
         graceWindowMinutes: 15,
         categories: ['Executive Strategy', 'Developer Q&A', 'Future of AI', 'Roundtable'],
         groundingContext: `Executive Roundtable Combined Context:
@@ -3266,6 +3181,7 @@ export class QaStore {
         actualStart: new Date(now - 1000 * 60 * 22).toISOString(),
         order: 1,
         adminToken: 'speaker_token_gdg_sarah',
+        speakerEmail: 'sarah.chen@askqlive.demo',
         graceWindowMinutes: 15,
         categories: ['Gemini 2.5', 'Agentic AI', 'Google AI Studio', 'Live Q&A', 'Grounding'],
         groundingContext: `Sarah Chen Keynote Context for GDG Live 2026:
@@ -3292,6 +3208,7 @@ export class QaStore {
         durationMinutes: 45,
         order: 2,
         adminToken: 'speaker_token_gdg_alex',
+        speakerEmail: 'alex.rivera@askqlive.demo',
         graceWindowMinutes: 10,
         categories: ['Angular 21', 'Zoneless', 'Signals', 'TypeScript', 'Performance'],
         groundingContext: `Alex Rivera Angular 21 Context:
@@ -3316,6 +3233,7 @@ export class QaStore {
         durationMinutes: 45,
         order: 3,
         adminToken: 'speaker_token_gdg_priya',
+        speakerEmail: 'priya.patel@askqlive.demo',
         graceWindowMinutes: 10,
         categories: ['Cloud Run', 'GCP', 'WebSockets', 'Serverless', 'DevOps'],
         groundingContext: `Priya Patel Cloud Architecture Context:

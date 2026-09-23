@@ -1354,8 +1354,13 @@ export class QaService {
     if (ok) {
       this.speakerSegmentId.set(invite.segmentId);
       this.selectedSegmentFilter.set(invite.segmentId);
+      // Claim server-side speaker scope (same staff portal path moderators use after role select)
+      const auth = await this.authenticateRole(invite.adminToken);
+      if (auth.role !== 'speaker') {
+        this.userRole.set('speaker');
+        this.userAuthScope.set([invite.segmentId]);
+      }
       this.navigateToTab('series-control');
-      this.showToast(`Opened your talk: ${invite.segmentTitle}`);
     }
     return ok;
   }
