@@ -6,7 +6,11 @@ import {
   resolveGroundingMimeType,
 } from './grounding-formats';
 
-export { GROUNDING_FILE_ACCEPT, resolveGroundingMimeType as resolveClientMimeType };
+export { GROUNDING_FILE_ACCEPT };
+
+export function resolveClientMimeType(file: File): string {
+  return resolveGroundingMimeType(file.name, file.type);
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
