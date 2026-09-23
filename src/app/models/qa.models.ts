@@ -134,6 +134,18 @@ export interface UserAccessInfo {
   segmentId?: string; // If speaker role
 }
 
+export interface GroundingFileMeta {
+  id: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  storagePath: string;
+  downloadUrl: string;
+  uploadedAt: string;
+  extractionMethod?: 'plain' | 'gemini-ocr' | 'openxml';
+  charCount?: number;
+}
+
 export interface Session {
   id: string;
   joinCode: string;
@@ -141,6 +153,8 @@ export interface Session {
   title: string;
   description?: string;
   contextData?: string;
+  /** Original grounding documents persisted in Firebase Storage. */
+  groundingFiles?: GroundingFileMeta[];
   isActive: boolean;
   createdAt: string;
   categories: string[];

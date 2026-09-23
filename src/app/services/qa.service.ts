@@ -17,6 +17,7 @@ import {
   HostedSessionRecord,
   SpeakerInviteRecord,
   ActiveLiveRoomPreview,
+  GroundingFileMeta,
 } from '../models/qa.models';
 import { FirebaseService } from './firebase.service';
 import { ClientStorageService } from './client-storage.service';
@@ -1878,6 +1879,60 @@ export class QaService {
       console.error('Error updating grounding context:', err);
       return false;
     }
+  }
+
+  /**
+   * Extract grounding text from a file and persist the original binary to
+   * Firebase Storage. Metadata is merged onto the session Firestore doc when
+   * a join code is available.
+   */
+  public async ingestGroundingFile(
+    file: File,
+    opts?: { sessionCode?: string }
+  ): Promise<{
+    text: string;
+    method: 'plain' | 'gemini-ocr' | 'openxml';
+    charCount: number;
+    storage: GroundingFileMeta | null;
+  }> {
+    const { extractGroundingTextFromFile, resolveClientMimeType } = await import(
+      '../utils/document-extract'
+    );
+    const extracted = await extractGroundingTextFromFile(file);
+    const code =
+      opts?.sessionCode ||
+      this.currentSession()?.joinCode ||
+      this.currentSeries()?.joinCode ||
+      'PENDING';
+
+    let storage: GroundingFileMeta | null = null;
+    try {
+      storage = await this.firebaseService.uploadGroundingFile(code, file, {
+        contentType: resolveClientMimeType(file),
+        extractionMethod: extracted.method,
+        charCount: extracted.charCount,
+      });
+      if (storage && code !== 'PENDING') {
+        await this.firebaseService.appendGroundingFileMeta(code, storage);
+        this.currentSession.update((s) =>
+          s
+            ? {
+                ...s,
+                groundingFiles: [...(s.groundingFiles || []).filter((f) => f.id !== storage!.id), storage!],
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      console.warn('Grounding Storage upload skipped:', err);
+    }
+
+    return {
+      text: extracted.text,
+      method: extracted.method,
+      charCount: extracted.charCount,
+      storage,
+    };
   }
 
   // Update Session Settings

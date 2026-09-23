@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
-import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
+import { GROUNDING_FILE_ACCEPT, describeExtractionMethod } from '../utils/document-extract';
+import { GroundingFileMeta } from '../models/qa.models';
 
 @Component({
   selector: 'app-grounding-context',
@@ -87,7 +88,7 @@ import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/do
             @if (isReadingFile()) {
               <div class="flex items-center justify-center gap-2 py-1.5 text-xs text-[#1A73E8] font-medium">
                 <span class="w-4 h-4 border-2 border-[#1A73E8] border-t-transparent rounded-full animate-spin"></span>
-                <span>Reading and extracting file contents...</span>
+                <span>Reading, extracting, and storing file...</span>
               </div>
             } @else if (uploadedFileName()) {
               <div class="flex items-center justify-between px-2 py-1 text-xs">
@@ -95,6 +96,9 @@ import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/do
                   <mat-icon class="text-base text-[#1E8E3E]">task</mat-icon>
                   <span class="truncate">Imported: {{ uploadedFileName() }}</span>
                   <span class="text-[11px] text-[#747775]">({{ uploadedFileSize() }})</span>
+                  @if (uploadedStoragePath()) {
+                    <span class="text-[10px] font-mono text-[#1A73E8] truncate" title="{{ uploadedStoragePath() }}">· Storage</span>
+                  }
                 </div>
                 <span
                   (click)="removeUploadedFile($event)"
@@ -110,7 +114,7 @@ import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/do
             } @else {
               <div class="flex items-center justify-center gap-2 text-xs text-[#444746]">
                 <mat-icon class="text-base text-[#1A73E8] group-hover:scale-110 transition-transform">cloud_upload</mat-icon>
-                <span class="font-medium text-[#1F1F1F]">Drag &amp; drop slide deck notes</span> or click to upload (TXT, MD, PDF, DOCX, PPTX, JSON, CSV)
+                <span class="font-medium text-[#1F1F1F]">Drag &amp; drop slide deck notes</span> or click to upload (PDF, PPTX, DOCX, TXT, MD, JSON, CSV, PNG/JPG)
               </div>
             }
           </button>
@@ -176,6 +180,8 @@ export class GroundingContext {
   public isReadingFile = signal<boolean>(false);
   public uploadedFileName = signal<string | null>(null);
   public uploadedFileSize = signal<string | null>(null);
+  public uploadedStoragePath = signal<string | null>(null);
+  public lastUploadedMeta = signal<GroundingFileMeta | null>(null);
 
   public contextControl = new FormControl(
     this.qaService.currentSession()?.contextData || '',
@@ -217,27 +223,38 @@ export class GroundingContext {
     event.stopPropagation();
     this.uploadedFileName.set(null);
     this.uploadedFileSize.set(null);
+    this.uploadedStoragePath.set(null);
+    this.lastUploadedMeta.set(null);
   }
 
   private async processFile(file: File): Promise<void> {
     this.isReadingFile.set(true);
     this.uploadedFileName.set(file.name);
     this.uploadedFileSize.set(this.formatFileSize(file.size));
+    this.uploadedStoragePath.set(null);
+    this.lastUploadedMeta.set(null);
 
     try {
-      const extracted = await extractGroundingTextFromFile(file);
+      const result = await this.qaService.ingestGroundingFile(file);
       const existing = this.contextControl.value || '';
       const prefix = existing.trim()
         ? `${existing.trim()}\n\n--- Document: ${file.name} ---\n`
         : `--- Document: ${file.name} ---\n`;
-      this.contextControl.setValue(prefix + extracted.text);
-      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      this.contextControl.setValue(prefix + result.text);
+      if (result.storage) {
+        this.uploadedStoragePath.set(result.storage.storagePath);
+        this.lastUploadedMeta.set(result.storage);
+      }
+      const via = describeExtractionMethod(result.method);
+      const stored = result.storage ? ' · saved to Storage' : '';
       this.qaService.showToast(
-        `Imported ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+        `Imported ${result.charCount.toLocaleString()} characters from ${file.name} via ${via}${stored}`
       );
     } catch (err) {
       this.uploadedFileName.set(null);
       this.uploadedFileSize.set(null);
+      this.uploadedStoragePath.set(null);
+      this.lastUploadedMeta.set(null);
       this.qaService.showToast(
         err instanceof Error ? err.message : `Error reading file ${file.name}`
       );

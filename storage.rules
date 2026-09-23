@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Grounding decks / notes uploaded for Gemini context.
+    // Path: grounding/{sessionOrSeriesCode}/{fileId}_{safeFileName}
+    match /grounding/{sessionCode}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 25 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('application/.*')
+          || request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('text/.*')
+        );
+      allow delete: if request.auth != null;
+    }
+
+    // Health / ops probes
+    match /grounding/_probe/{fileName} {
+      allow read, write: if true;
+    }
+  }
+}

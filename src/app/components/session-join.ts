@@ -6,7 +6,7 @@ import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
 import { formatFirebaseAuthError } from '../services/firebase-auth-errors';
 import { HostedSessionRecord, ModerationSensitivity, Segment, SegmentType } from '../models/qa.models';
-import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
+import { GROUNDING_FILE_ACCEPT, describeExtractionMethod } from '../utils/document-extract';
 
 interface SegmentDraft {
   id: string;
@@ -1070,6 +1070,8 @@ export class SessionJoin implements OnInit {
   public groundingFileAccept = GROUNDING_FILE_ACCEPT;
   public uploadedFileName = signal<string | null>(null);
   public uploadedFileSize = signal<string | null>(null);
+  /** Kept so we can upload the original binary to Storage after the room is created. */
+  private pendingGroundingFile: File | null = null;
 
   // Speaker segments for Series Builder (starts clean with 2 empty talks)
   public seriesSegments = signal<SegmentDraft[]>([
@@ -1485,32 +1487,36 @@ export class SessionJoin implements OnInit {
     event.stopPropagation();
     this.uploadedFileName.set(null);
     this.uploadedFileSize.set(null);
+    this.pendingGroundingFile = null;
   }
 
   private async processFile(file: File, target: 'single' | 'series'): Promise<void> {
     this.isReadingFile.set(true);
     this.uploadedFileName.set(file.name);
     this.uploadedFileSize.set(this.formatFileSize(file.size));
+    this.pendingGroundingFile = file;
 
     try {
-      const extracted = await extractGroundingTextFromFile(file);
+      const result = await this.qaService.ingestGroundingFile(file, { sessionCode: 'PENDING' });
       const prefixLabel = `--- Document: ${file.name} ---\n`;
       if (target === 'series') {
         const existing = this.seriesForm.get('seriesContextData')?.value || '';
         const prefix = existing.trim() ? `${existing.trim()}\n\n${prefixLabel}` : prefixLabel;
-        this.seriesForm.patchValue({ seriesContextData: prefix + extracted.text });
+        this.seriesForm.patchValue({ seriesContextData: prefix + result.text });
       } else {
         const existing = this.createForm.get('contextData')?.value || '';
         const prefix = existing.trim() ? `${existing.trim()}\n\n${prefixLabel}` : prefixLabel;
-        this.createForm.patchValue({ contextData: prefix + extracted.text });
+        this.createForm.patchValue({ contextData: prefix + result.text });
       }
-      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      const via = describeExtractionMethod(result.method);
+      const stored = result.storage ? ' · staged in Storage' : '';
       this.qaService.showToast(
-        `Extracted ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+        `Extracted ${result.charCount.toLocaleString()} characters from ${file.name} via ${via}${stored}`
       );
     } catch (err) {
       this.uploadedFileName.set(null);
       this.uploadedFileSize.set(null);
+      this.pendingGroundingFile = null;
       this.qaService.showToast(
         err instanceof Error ? err.message : `Error reading file ${file.name}`
       );
@@ -1555,6 +1561,12 @@ export class SessionJoin implements OnInit {
     });
 
     if (series) {
+      if (this.pendingGroundingFile) {
+        void this.qaService.ingestGroundingFile(this.pendingGroundingFile, {
+          sessionCode: series.joinCode,
+        });
+        this.pendingGroundingFile = null;
+      }
       this.showCreateModal.set(false);
       this.qaService.navigateToTab('series-control');
     }
@@ -1576,6 +1588,12 @@ export class SessionJoin implements OnInit {
     });
 
     if (session) {
+      if (this.pendingGroundingFile) {
+        void this.qaService.ingestGroundingFile(this.pendingGroundingFile, {
+          sessionCode: session.joinCode,
+        });
+        this.pendingGroundingFile = null;
+      }
       this.showCreateModal.set(false);
       this.qaService.navigateToTab('feed');
     }

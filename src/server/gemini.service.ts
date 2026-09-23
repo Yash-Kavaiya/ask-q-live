@@ -1,5 +1,12 @@
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { isPlausibleApiKey } from './api-key.js';
+import {
+  assertSupportedGroundingUpload,
+  classifyGroundingFile,
+  normalizeGeminiInlineMime,
+  resolveGroundingMimeType,
+} from '../app/utils/grounding-formats.js';
+import { extractOpenXmlText } from './openxml-extract.js';
 
 export { isPlausibleApiKey };
 
@@ -1208,40 +1215,8 @@ ${speakers.map(s => `| ${s.speakerName} | ${s.talkTitle} | ${s.questionCount} | 
   }
 }
 
-const PLAIN_TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'html', 'htm', 'xml', 'log']);
-
-const EXTRACT_MIME_BY_EXT: Record<string, string> = {
-  pdf: 'application/pdf',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  ppt: 'application/vnd.ms-powerpoint',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  doc: 'application/msword',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-};
-
-function extensionOf(filename: string): string {
-  const parts = filename.split('.');
-  return parts.length > 1 ? (parts.pop() || '').toLowerCase() : '';
-}
-
 export function resolveDocumentMimeType(filename: string, providedMime?: string): string {
-  const fromName = EXTRACT_MIME_BY_EXT[extensionOf(filename)];
-  if (fromName) return fromName;
-  if (providedMime && providedMime !== 'application/octet-stream') return providedMime;
-  return 'application/octet-stream';
+  return resolveGroundingMimeType(filename, providedMime);
 }
 
 function decodeBase64Utf8(base64: string): string {
@@ -1250,17 +1225,21 @@ function decodeBase64Utf8(base64: string): string {
 
 /**
  * Extract readable grounding text from an uploaded document.
- * Plain text types are decoded locally; everything else is OCR/transcribed with Gemini multimodal.
+ *
+ * Routing:
+ * - TXT/MD/JSON/CSV/HTML/… → local plain-text decode
+ * - DOCX/PPTX → Open XML zip text extraction (no Gemini required)
+ * - PDF + images → Gemini multimodal OCR
+ * - Legacy .doc/.ppt → rejected with a clear conversion message
  */
 export async function extractDocumentText(params: {
   base64: string;
   mimeType?: string;
   filename: string;
   apiKey?: string | null;
-}): Promise<{ text: string; method: 'plain' | 'gemini-ocr'; charCount: number }> {
+}): Promise<{ text: string; method: 'plain' | 'gemini-ocr' | 'openxml'; charCount: number }> {
   const filename = (params.filename || 'document').trim() || 'document';
-  const ext = extensionOf(filename);
-  const mimeType = resolveDocumentMimeType(filename, params.mimeType);
+  const mimeType = resolveGroundingMimeType(filename, params.mimeType);
   const base64 = (params.base64 || '').replace(/^data:[^;]+;base64,/, '').trim();
 
   if (!base64) {
@@ -1268,18 +1247,17 @@ export async function extractDocumentText(params: {
   }
 
   // ~25MB raw ≈ ~33MB base64; reject oversized payloads early
+  const approxBytes = Math.floor((base64.length * 3) / 4);
   if (base64.length > 36_000_000) {
     throw new Error('Document is too large (max 25MB)');
   }
 
-  const isPlain =
-    PLAIN_TEXT_EXTENSIONS.has(ext) ||
-    mimeType.startsWith('text/') ||
-    mimeType === 'application/json' ||
-    mimeType === 'application/xml';
+  assertSupportedGroundingUpload(filename, approxBytes, mimeType);
+  const kind = classifyGroundingFile(filename, mimeType);
 
-  if (isPlain) {
+  if (kind === 'plain') {
     let text = decodeBase64Utf8(base64);
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
     if (ext === 'json' || mimeType === 'application/json') {
       try {
         const parsed = JSON.parse(text);
@@ -1295,15 +1273,23 @@ export async function extractDocumentText(params: {
     return { text: cleaned, method: 'plain', charCount: cleaned.length };
   }
 
+  if (kind === 'openxml') {
+    const buffer = Buffer.from(base64, 'base64');
+    const extracted = await extractOpenXmlText(buffer, filename);
+    return { text: extracted.text, method: 'openxml', charCount: extracted.charCount };
+  }
+
+  // PDF + images → Gemini
   const ai = getAiClient(params.apiKey);
   if (!ai) {
     throw new Error('GEMINI_API_KEY is not configured — cannot OCR this document');
   }
 
+  const inlineMime = normalizeGeminiInlineMime(mimeType, kind);
   const prompt =
     `You are a document OCR and transcription engine for live event Q&A grounding.\n` +
     `File name: ${filename}\n` +
-    `MIME type: ${mimeType}\n\n` +
+    `MIME type: ${inlineMime}\n\n` +
     `Extract ALL readable text from this document or image for retrieval-augmented grounding.\n` +
     `Rules:\n` +
     `- Preserve reading order (slides top-to-bottom, left-to-right; pages in order).\n` +
@@ -1313,66 +1299,84 @@ export async function extractDocumentText(params: {
     `- Do NOT return markdown fences or commentary — plain text only.\n` +
     `- If almost nothing is readable, return a short note starting with "NO_TEXT_FOUND:".`;
 
-  const models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+  const models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < models.length; attempt++) {
     const model = models[attempt];
-    try {
-      const config: Record<string, unknown> = {
-        temperature: 0.1,
-      };
-      if (model.includes('3.7')) {
-        config['thinkingConfig'] = { thinkingLevel: ThinkingLevel.LOW };
-      }
+    for (let retry = 0; retry < 2; retry++) {
+      try {
+        const config: Record<string, unknown> = {
+          temperature: 0.1,
+        };
+        if (model.includes('3.7')) {
+          config['thinkingConfig'] = { thinkingLevel: ThinkingLevel.LOW };
+        }
 
-      const response = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { inlineData: { mimeType, data: base64 } },
-              { text: prompt },
-            ],
-          },
-        ],
-        config,
-      });
+        const response = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { inlineData: { mimeType: inlineMime, data: base64 } },
+                { text: prompt },
+              ],
+            },
+          ],
+          config,
+        });
 
-      const raw = (response && typeof response.text === 'string' ? response.text : '').trim();
-      if (!raw) {
-        throw new Error('Empty OCR response');
-      }
-      if (raw.startsWith('NO_TEXT_FOUND:')) {
-        throw new Error(
-          'Gemini could not find readable text in this document. Try a clearer scan or paste notes manually.'
+        const raw = (response && typeof response.text === 'string' ? response.text : '').trim();
+        if (!raw) {
+          throw new Error('Empty OCR response');
+        }
+        if (raw.startsWith('NO_TEXT_FOUND:')) {
+          throw new Error(
+            'Gemini could not find readable text in this document. Try a clearer scan, PNG/JPG export, or paste notes manually.'
+          );
+        }
+
+        const cleaned = raw
+          .replace(/^```(?:text|markdown)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+
+        if (cleaned.length < 8) {
+          throw new Error('OCR returned too little text from this document');
+        }
+
+        return { text: cleaned, method: 'gemini-ocr', charCount: cleaned.length };
+      } catch (err: unknown) {
+        lastError = err;
+        const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
+        if (
+          errorMsg.includes('API key not valid') ||
+          errorMsg.includes('API_KEY_INVALID') ||
+          errorMsg.includes('429') ||
+          errorMsg.includes('quota') ||
+          errorMsg.includes('RESOURCE_EXHAUSTED')
+        ) {
+          throw err;
+        }
+        const unsupportedMime =
+          errorMsg.includes('Unsupported MIME') ||
+          errorMsg.includes('INVALID_ARGUMENT') ||
+          errorMsg.includes('mime type');
+        if (unsupportedMime && (kind === 'image' || inlineMime === 'image/gif' || inlineMime === 'image/bmp')) {
+          throw new Error(
+            'This image format is not supported for OCR. Please upload PNG, JPG, or WEBP instead.'
+          );
+        }
+        const busy =
+          errorMsg.includes('UNAVAILABLE') ||
+          errorMsg.includes('high demand') ||
+          errorMsg.includes('503');
+        await new Promise((resolve) =>
+          setTimeout(resolve, (busy ? 600 : 120) * (attempt + 1) * (retry + 1))
         );
+        if (!busy) break;
       }
-
-      const cleaned = raw
-        .replace(/^```(?:text|markdown)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-
-      if (cleaned.length < 8) {
-        throw new Error('OCR returned too little text from this document');
-      }
-
-      return { text: cleaned, method: 'gemini-ocr', charCount: cleaned.length };
-    } catch (err: unknown) {
-      lastError = err;
-      const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
-      if (
-        errorMsg.includes('API key not valid') ||
-        errorMsg.includes('API_KEY_INVALID') ||
-        errorMsg.includes('429') ||
-        errorMsg.includes('quota') ||
-        errorMsg.includes('RESOURCE_EXHAUSTED')
-      ) {
-        throw err;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
     }
   }
 

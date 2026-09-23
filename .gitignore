@@ -63,3 +63,8 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Local grounding Storage E2E artifacts
+tmp-grounding-*
+tmp-grounding-test.pdf
+

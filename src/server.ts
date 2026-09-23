@@ -15,6 +15,7 @@ import {
   generatePostSessionReport,
   extractDocumentText,
 } from './server/gemini.service.js';
+import { uploadGroundingBytes } from './server/gcs-grounding.js';
 import {
   requireAuth,
   resolveAuth,
@@ -834,6 +835,40 @@ app.post('/api/extract-document', async (req, res) => {
           ? 400
           : 500;
     console.warn('extract-document failed:', msg.slice(0, 200));
+    res.status(status).json({ error: msg });
+  }
+});
+
+// Persist original grounding document (PDF/deck) to Firebase Storage
+app.post('/api/upload-grounding-file', async (req, res) => {
+  try {
+    const { filename, mimeType, data, base64, sessionCode } = req.body || {};
+    const payload = typeof data === 'string' ? data : typeof base64 === 'string' ? base64 : '';
+    const name = typeof filename === 'string' ? filename : 'document.pdf';
+    const code = typeof sessionCode === 'string' ? sessionCode : 'PENDING';
+
+    if (!payload) {
+      res.status(400).json({ error: 'base64 document data is required' });
+      return;
+    }
+
+    const stored = await uploadGroundingBytes({
+      sessionCode: code,
+      fileName: name,
+      mimeType: typeof mimeType === 'string' ? mimeType : undefined,
+      base64: payload,
+    });
+
+    res.json({ success: true, file: stored });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Grounding file upload failed';
+    const status =
+      msg.includes('access token') || msg.includes('Could not obtain')
+        ? 503
+        : msg.includes('too large') || msg.includes('Empty')
+          ? 400
+          : 500;
+    console.warn('upload-grounding-file failed:', msg.slice(0, 240));
     res.status(status).json({ error: msg });
   }
 });

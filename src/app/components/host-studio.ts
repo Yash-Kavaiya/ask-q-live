@@ -5,7 +5,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
 import { FirebaseService } from '../services/firebase.service';
 import { HostedSessionRecord, SegmentType, SpeakerInviteRecord } from '../models/qa.models';
-import { extractGroundingTextFromFile, GROUNDING_FILE_ACCEPT } from '../utils/document-extract';
+import { GROUNDING_FILE_ACCEPT, describeExtractionMethod } from '../utils/document-extract';
 
 export interface SegmentDraft {
   id: string;
@@ -1022,6 +1022,7 @@ export class HostStudio implements OnInit {
   public groundingFileAccept = GROUNDING_FILE_ACCEPT;
   public singleUploadedFileName = signal<string | null>(null);
   public singleUploadedFileSize = signal<string | null>(null);
+  private pendingSingleGroundingFile: File | null = null;
 
   public singleAutoCode = signal<string>('ROOM' + Math.random().toString(36).substring(2, 6).toUpperCase());
   public seriesAutoCode = signal<string>('SUMMIT' + Math.random().toString(36).substring(2, 6).toUpperCase());
@@ -1215,6 +1216,7 @@ export class HostStudio implements OnInit {
   public removeSingleUploadedFile(): void {
     this.singleUploadedFileName.set(null);
     this.singleUploadedFileSize.set(null);
+    this.pendingSingleGroundingFile = null;
     this.singleForm.patchValue({ groundingContext: '' });
   }
 
@@ -1223,18 +1225,21 @@ export class HostStudio implements OnInit {
     this.isSingleReadingFile.set(true);
     this.singleUploadedFileName.set(file.name);
     this.singleUploadedFileSize.set(this.formatFileSize(file.size));
+    this.pendingSingleGroundingFile = file;
 
     try {
-      const extracted = await extractGroundingTextFromFile(file);
-      this.singleForm.patchValue({ groundingContext: extracted.text });
-      const via = extracted.method === 'gemini-ocr' ? 'Gemini OCR' : 'text import';
+      const result = await this.qaService.ingestGroundingFile(file, { sessionCode: 'PENDING' });
+      this.singleForm.patchValue({ groundingContext: result.text });
+      const via = describeExtractionMethod(result.method);
+      const stored = result.storage ? ' · staged in Storage' : '';
       this.qaService.showToast(
-        `Extracted ${extracted.charCount.toLocaleString()} characters from ${file.name} via ${via}`
+        `Extracted ${result.charCount.toLocaleString()} characters from ${file.name} via ${via}${stored}`
       );
     } catch (err) {
       console.error('Failed to parse uploaded slide deck file:', err);
       this.singleUploadedFileName.set(null);
       this.singleUploadedFileSize.set(null);
+      this.pendingSingleGroundingFile = null;
       this.qaService.showToast(
         err instanceof Error ? err.message : 'Could not read document. Please paste notes directly.'
       );
@@ -1308,6 +1313,12 @@ export class HostStudio implements OnInit {
     });
     this.isSubmitting.set(false);
     if (session) {
+      if (this.pendingSingleGroundingFile) {
+        void this.qaService.ingestGroundingFile(this.pendingSingleGroundingFile, {
+          sessionCode: session.joinCode,
+        });
+        this.pendingSingleGroundingFile = null;
+      }
       this.singleUploadedFileName.set(null);
       this.singleUploadedFileSize.set(null);
       this.showCreateModal.set(false);

@@ -1,6 +1,7 @@
 ﻿import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 /**
  * Resolve Firebase apiKey at runtime — never hardcoded in source.
@@ -33,6 +34,7 @@ export const firebaseConfig = { ...BASE_CONFIG, apiKey: resolveFirebaseApiKey() 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let storage: FirebaseStorage | null = null;
 
 export function getFirebaseApp(): FirebaseApp | null {
   if (typeof window === 'undefined') return null;
@@ -63,4 +65,15 @@ export function getFirebaseAuth(): Auth | null {
     }
   }
   return auth;
+}
+
+export function getFirebaseStorage(): FirebaseStorage | null {
+  if (typeof window === 'undefined') return null;
+  if (!storage) {
+    const fApp = getFirebaseApp();
+    if (fApp) {
+      storage = getStorage(fApp, `gs://${BASE_CONFIG.storageBucket}`);
+    }
+  }
+  return storage;
 }

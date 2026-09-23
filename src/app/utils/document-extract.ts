@@ -1,44 +1,12 @@
-/** Shared grounding document extraction (plain text locally, Gemini OCR for binaries/images). */
+/** Shared grounding document extraction (plain text locally, server for binaries/images/Office). */
 
-const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+import {
+  assertSupportedGroundingUpload,
+  GROUNDING_FILE_ACCEPT,
+  resolveGroundingMimeType,
+} from './grounding-formats';
 
-const PLAIN_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'html', 'htm', 'xml', 'log']);
-
-const MIME_BY_EXT: Record<string, string> = {
-  pdf: 'application/pdf',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  ppt: 'application/vnd.ms-powerpoint',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  doc: 'application/msword',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  json: 'application/json',
-  csv: 'text/csv',
-};
-
-export const GROUNDING_FILE_ACCEPT =
-  '.pdf,.pptx,.ppt,.txt,.md,.markdown,.docx,.doc,.json,.csv,.png,.jpg,.jpeg,.webp,.gif,.bmp';
-
-function extensionOf(filename: string): string {
-  const parts = filename.split('.');
-  return parts.length > 1 ? (parts.pop() || '').toLowerCase() : '';
-}
-
-export function resolveClientMimeType(file: File): string {
-  const fromName = MIME_BY_EXT[extensionOf(file.name)];
-  if (fromName) return fromName;
-  if (file.type && file.type !== 'application/octet-stream') return file.type;
-  return 'application/octet-stream';
-}
+export { GROUNDING_FILE_ACCEPT, resolveGroundingMimeType as resolveClientMimeType };
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -59,22 +27,22 @@ function fileToBase64(file: File): Promise<string> {
 
 export async function extractGroundingTextFromFile(file: File): Promise<{
   text: string;
-  method: 'plain' | 'gemini-ocr';
+  method: 'plain' | 'gemini-ocr' | 'openxml';
   charCount: number;
 }> {
   if (!file) {
     throw new Error('No file selected');
   }
-  if (file.size > MAX_DOCUMENT_BYTES) {
-    throw new Error(`File is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Max allowed size is 25MB.`);
-  }
 
-  const ext = extensionOf(file.name);
-  const mimeType = resolveClientMimeType(file);
+  const mimeType = resolveGroundingMimeType(file.name, file.type);
+  assertSupportedGroundingUpload(file.name, file.size, mimeType);
+
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
   const isPlain =
-    PLAIN_EXTENSIONS.has(ext) ||
     mimeType.startsWith('text/') ||
-    mimeType === 'application/json';
+    mimeType === 'application/json' ||
+    mimeType === 'application/xml' ||
+    ['txt', 'md', 'markdown', 'json', 'csv', 'tsv', 'html', 'htm', 'xml', 'log'].includes(ext);
 
   if (isPlain) {
     let text = await file.text();
@@ -93,6 +61,7 @@ export async function extractGroundingTextFromFile(file: File): Promise<{
     return { text: cleaned, method: 'plain', charCount: cleaned.length };
   }
 
+  // PDF, images, DOCX, PPTX → server (Open XML extract or Gemini OCR)
   const base64 = await fileToBase64(file);
   const res = await fetch('/api/extract-document', {
     method: 'POST',
@@ -106,7 +75,7 @@ export async function extractGroundingTextFromFile(file: File): Promise<{
 
   const body = (await res.json().catch(() => ({}))) as {
     text?: string;
-    method?: 'plain' | 'gemini-ocr';
+    method?: 'plain' | 'gemini-ocr' | 'openxml';
     charCount?: number;
     error?: string;
   };
@@ -120,4 +89,10 @@ export async function extractGroundingTextFromFile(file: File): Promise<{
     method: body.method || 'gemini-ocr',
     charCount: body.charCount ?? body.text.length,
   };
+}
+
+export function describeExtractionMethod(method: 'plain' | 'gemini-ocr' | 'openxml'): string {
+  if (method === 'openxml') return 'Office text extract';
+  if (method === 'gemini-ocr') return 'Gemini OCR';
+  return 'text import';
 }

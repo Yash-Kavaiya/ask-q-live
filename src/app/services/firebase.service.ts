@@ -30,9 +30,16 @@ import {
   updateProfile,
   signOut,
 } from 'firebase/auth';
+import {
+  getStorage,
+  FirebaseStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 import firebaseConfigData from '../../../firebase-applet-config.json';
 import { resolveFirebaseApiKey } from '../firebase';
-import { Question, Session, QuestionStatus, Segment, Series, SessionSeries } from '../models/qa.models';
+import { Question, Session, QuestionStatus, Segment, Series, SessionSeries, GroundingFileMeta } from '../models/qa.models';
 import {
   clean,
   fromFirestoreSeries,
@@ -79,6 +86,7 @@ export class FirebaseService {
   public app: FirebaseApp | null = null;
   public db: Firestore | null = null;
   public auth: Auth | null = null;
+  public storage: FirebaseStorage | null = null;
 
   public currentUser = signal<OrganizerAuthUser | null>(null);
   public isConnected = signal<boolean>(false);
@@ -320,6 +328,12 @@ export class FirebaseService {
       // Initialize Auth
       this.auth = getAuth(this.app);
 
+      // Initialize Firebase Storage (grounding PDF / deck uploads)
+      const bucket = (firebaseConfigData as { storageBucket?: string }).storageBucket;
+      this.storage = bucket
+        ? getStorage(this.app, `gs://${bucket}`)
+        : getStorage(this.app);
+
       onAuthStateChanged(this.auth, (user) => {
         this.currentUser.set(user ? this.toOrganizerAuthUser(user) : null);
         if (user) {
@@ -538,6 +552,7 @@ export class FirebaseService {
               title: data['title'] || 'Live Q&A Session',
               description: data['description'] || '',
               contextData: data['contextData'] || '',
+              groundingFiles: Array.isArray(data['groundingFiles']) ? data['groundingFiles'] : [],
               isActive: data['isActive'] !== false,
               createdAt: data['createdAt'] || new Date().toISOString(),
               categories: data['categories'] || ['General', 'Technical', 'Product', 'Business'],
@@ -584,6 +599,7 @@ export class FirebaseService {
           title: session.title,
           description: session.description || '',
           contextData: session.contextData || '',
+          groundingFiles: session.groundingFiles || [],
           isActive: session.isActive,
           createdAt: session.createdAt,
           categories: session.categories || ['General'],
@@ -887,6 +903,124 @@ export class FirebaseService {
       console.warn('Firestore loadSpeakerInvites note:', err);
       this.lastError.set(message);
       return [];
+    }
+  }
+
+  /**
+   * Upload a grounding document (PDF / deck / notes) to Firebase Storage and
+   * return durable metadata (path + download URL). Falls back to the server
+   * `/api/upload-grounding-file` endpoint when the client SDK cannot write.
+   */
+  public async uploadGroundingFile(
+    sessionOrSeriesCode: string,
+    file: File,
+    opts?: { contentType?: string; extractionMethod?: 'plain' | 'gemini-ocr' | 'openxml'; charCount?: number }
+  ): Promise<GroundingFileMeta | null> {
+    const code = (sessionOrSeriesCode || 'PENDING').toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    const contentType = opts?.contentType || file.type || 'application/octet-stream';
+
+    if (this.storage) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+      const id = `gf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const storagePath = `grounding/${code}/${id}_${safeName}`;
+
+      try {
+        const ref = storageRef(this.storage, storagePath);
+        const snapshot = await uploadBytes(ref, file, {
+          contentType,
+          customMetadata: {
+            originalFileName: file.name,
+            uploadedAt: new Date().toISOString(),
+            sessionCode: code,
+          },
+        });
+        const downloadUrl = await getDownloadURL(snapshot.ref);
+        return {
+          id,
+          fileName: file.name,
+          contentType,
+          sizeBytes: file.size,
+          storagePath,
+          downloadUrl,
+          uploadedAt: new Date().toISOString(),
+          extractionMethod: opts?.extractionMethod,
+          charCount: opts?.charCount,
+        };
+      } catch (err) {
+        console.warn('Firebase Storage client upload failed, trying server fallback:', err);
+      }
+    }
+
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          if (typeof result !== 'string') {
+            reject(new Error('Could not read file'));
+            return;
+          }
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(new Error('Error reading file'));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/upload-grounding-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionCode: code,
+          filename: file.name,
+          mimeType: contentType,
+          data: base64,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        file?: GroundingFileMeta;
+        error?: string;
+      };
+      if (!res.ok || !body.file) {
+        throw new Error(body.error || `Server storage upload failed (${res.status})`);
+      }
+      return {
+        ...body.file,
+        extractionMethod: opts?.extractionMethod,
+        charCount: opts?.charCount,
+      };
+    } catch (err) {
+      console.warn('Grounding Storage upload failed:', err);
+      this.lastError.set(err instanceof Error ? err.message : 'Storage upload failed');
+      return null;
+    }
+  }
+
+  /** Append grounding file metadata onto a session document in Firestore. */
+  public async appendGroundingFileMeta(
+    sessionCode: string,
+    meta: GroundingFileMeta
+  ): Promise<boolean> {
+    if (!this.db || !meta) return false;
+    const code = sessionCode.toUpperCase().trim();
+    try {
+      const sessionRef = doc(this.db, 'sessions', code);
+      const snap = await getDoc(sessionRef);
+      const existing = snap.exists() && Array.isArray(snap.data()?.['groundingFiles'])
+        ? (snap.data()!['groundingFiles'] as GroundingFileMeta[])
+        : [];
+      await setDoc(
+        sessionRef,
+        {
+          groundingFiles: [...existing.filter((f) => f.id !== meta.id), meta],
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return true;
+    } catch (err) {
+      console.warn('Firestore appendGroundingFileMeta note:', err);
+      return false;
     }
   }
 
