@@ -54,6 +54,12 @@ __screenshots__/
 # Claude in Chrome browser automation scratch output (console logs, page snapshots)
 .playwright-mcp/
 
+# Large local marketing / media (LaTeX, pitch deck, promo videos)
+/docs/askqlive-latex-walkthrough/
+/docs/askqlive-pitch-deck/
+/docs/readme/
+/videos/
+
 # System files
 .DS_Store
 Thumbs.db
