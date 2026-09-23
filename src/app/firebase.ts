@@ -20,12 +20,12 @@ export function resolveFirebaseApiKey(): string {
 }
 
 const BASE_CONFIG = {
-  authDomain: 'genaiguru.firebaseapp.com',
-  projectId: 'genaiguruyoutube',
-  storageBucket: 'genaiguruyoutube.firebasestorage.app',
-  messagingSenderId: '759503671462',
-  appId: '1:759503671462:web:b4c46f7c481d1df2f62467',
-  firestoreDatabaseId: 'ai-studio-liveqaplatform-d7273fea-9de9-49df-ad9d-7e1effee902a',
+  authDomain: 'gen-ai-guru-gdg-pune.firebaseapp.com',
+  projectId: 'gen-ai-guru-gdg-pune',
+  storageBucket: 'gen-ai-guru-gdg-pune.firebasestorage.app',
+  messagingSenderId: '443180956629',
+  appId: '1:443180956629:web:1428dd86f1d33580971b5c',
+  firestoreDatabaseId: '(default)',
 };
 
 export const firebaseConfig = { ...BASE_CONFIG, apiKey: resolveFirebaseApiKey() };

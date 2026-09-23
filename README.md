@@ -148,9 +148,8 @@ flowchart LR
 | DNS | Cloudflare → Cloud Run domain mapping |
 | Analytics | Google Analytics (`G-V2Q44SS4M9`), Microsoft Clarity |
 
-**GCP project (deploy):** `gen-ai-guru-gdg-pune`  
-**Firebase project (app config):** `genaiguruyoutube`  
-**Service:** `ask-q-live`
+**GCP + Firebase project (single):** `gen-ai-guru-gdg-pune`  
+**Service:** `ask-q-live` · **Firestore:** `(default)` · **Auth:** Firebase Auth in the same project
 
 ---
 
