@@ -25,7 +25,7 @@ const BASE_CONFIG = {
   storageBucket: 'genaiguruyoutube.firebasestorage.app',
   messagingSenderId: '759503671462',
   appId: '1:759503671462:web:b4c46f7c481d1df2f62467',
-  firestoreDatabaseId: '(default)',
+  firestoreDatabaseId: 'ai-studio-liveqaplatform-d7273fea-9de9-49df-ad9d-7e1effee902a',
 };
 
 export const firebaseConfig = { ...BASE_CONFIG, apiKey: resolveFirebaseApiKey() };
