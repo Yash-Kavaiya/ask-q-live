@@ -192,6 +192,18 @@ export class SessionApiClient {
     if (!res.ok) throw new Error('Failed to add segment');
   }
 
+  async deleteSegment(code: string, segmentId: string, token: string | null): Promise<void> {
+    const res = await fetch(`/api/series/${code}/segments/${segmentId}`, {
+      method: 'DELETE',
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || 'Failed to delete segment');
+    }
+  }
+
   async reorderSegments(code: string, segmentIds: string[], token: string | null): Promise<void> {
     const res = await fetch(`/api/series/${code}/segments/reorder`, {
       method: 'POST',

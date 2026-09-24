@@ -1238,8 +1238,14 @@ export class QaStore {
     const seg = series.segments.find(s => s.id === segmentId);
     if (!seg) return { success: false, status: 404, error: 'Segment not found' };
 
-    if (patch.title) seg.title = patch.title;
-    if (patch.speakerName) seg.speakerName = patch.speakerName;
+    if (patch.title !== undefined) {
+      const t = String(patch.title || '').trim();
+      if (t) seg.title = t;
+    }
+    if (patch.speakerName !== undefined) {
+      const n = String(patch.speakerName || '').trim();
+      if (n) seg.speakerName = n;
+    }
     if (patch.speakerBio !== undefined) seg.speakerBio = patch.speakerBio;
     if (patch.speakerRole !== undefined) seg.speakerRole = patch.speakerRole;
     if (patch.speakerAvatar !== undefined) seg.speakerAvatar = patch.speakerAvatar;
@@ -1281,9 +1287,14 @@ export class QaStore {
       seg.groundingContext = patch.contextData;
     }
     if (patch.categories && Array.isArray(patch.categories)) seg.categories = patch.categories;
+    if (patch.type) seg.type = patch.type;
     if (patch.durationMinutes) {
       seg.durationMinutes = patch.durationMinutes;
       seg.scheduledDurationMinutes = patch.durationMinutes;
+    }
+    if (patch.scheduledDurationMinutes && !patch.durationMinutes) {
+      seg.scheduledDurationMinutes = patch.scheduledDurationMinutes;
+      seg.durationMinutes = patch.scheduledDurationMinutes;
     }
 
     series.revision = (series.revision || 1) + 1;

@@ -1,11 +1,23 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { QaService } from '../services/qa.service';
-import { Segment } from '../models/qa.models';
+import { Segment, SegmentType } from '../models/qa.models';
 
-type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerLinkedIn' | 'speakerWebsite';
+type TalkDraftField =
+  | 'title'
+  | 'speakerName'
+  | 'speakerRole'
+  | 'speakerBio'
+  | 'email'
+  | 'sessionDescription'
+  | 'speakerX'
+  | 'speakerLinkedIn'
+  | 'speakerWebsite'
+  | 'durationMinutes'
+  | 'type'
+  | 'groundingContext';
 
 @Component({
   selector: 'app-series-manage',
@@ -53,7 +65,7 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                 {{ qaService.currentSeries()?.title }}
               </h2>
               <p class="text-sm text-slate-500 mt-1">
-                Series settings, speaker invites, and audience share — without leaving the room.
+                Edit series settings and every talk — title, speaker, invites, socials, grounding — or delete a talk (confirmed twice).
               </p>
             </div>
             <div class="flex flex-wrap gap-2 shrink-0">
@@ -72,21 +84,6 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                 <mat-icon class="text-sm mr-1.5">theater_comedy</mat-icon> Run of Show
               </button>
             </div>
-          </div>
-
-          <div class="flex flex-wrap gap-2">
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-50 border border-slate-200 text-slate-600">
-              <mat-icon class="text-xs">key</mat-icon> Gemini key
-            </span>
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-50 border border-slate-200 text-slate-600">
-              <mat-icon class="text-xs">mail</mat-icon> Speaker Gmail
-            </span>
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-50 border border-slate-200 text-slate-600">
-              <mat-icon class="text-xs">share</mat-icon> X · LinkedIn · Web
-            </span>
-            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-50 border border-slate-200 text-slate-600">
-              <mat-icon class="text-xs">notes</mat-icon> Session description
-            </span>
           </div>
         </div>
 
@@ -111,6 +108,15 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                 formControlName="description"
                 rows="2"
                 class="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+              ></textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Series grounding context</label>
+              <textarea
+                formControlName="contextData"
+                rows="3"
+                placeholder="Shared event context for Gemini across all talks…"
+                class="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-mono text-xs"
               ></textarea>
             </div>
             <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
@@ -149,7 +155,7 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
           </form>
         </div>
 
-        <!-- Speakers & invites -->
+        <!-- Speakers — full edit + delete -->
         <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -158,34 +164,40 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                 Speakers, socials &amp; session blurbs
               </h3>
               <p class="text-xs text-slate-500 mt-0.5">
-                Invite Gmail, X / LinkedIn / website, and a public description for each talk.
+                Edit talk title, speaker, duration, grounding, invites, and socials. Delete requires two confirmations.
               </p>
             </div>
             <button
               type="button"
-              (click)="qaService.navigateToTab('series-control')"
-              class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl cursor-pointer"
+              (click)="addTalk()"
+              [disabled]="isAddingTalk()"
+              class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl cursor-pointer disabled:opacity-50"
             >
               <mat-icon class="text-sm">add</mat-icon>
-              Add / edit talks
+              Add talk
             </button>
           </div>
 
           @if (qaService.segments().length === 0) {
             <div class="text-center py-8 rounded-xl border border-dashed border-slate-200 bg-slate-50/60">
-              <p class="text-sm text-slate-600">No talks yet. Add speakers from Run of Show.</p>
+              <p class="text-sm text-slate-600">No talks yet. Add a talk above.</p>
             </div>
           } @else {
             <div class="space-y-4">
               @for (seg of qaService.segments(); track seg.id; let i = $index) {
-                <div class="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                <div
+                  class="p-4 rounded-xl border space-y-3"
+                  [class.border-red-300]="deleteStep(seg.id) > 0"
+                  [class.bg-red-50/40]="deleteStep(seg.id) > 0"
+                  [class.border-slate-200]="deleteStep(seg.id) === 0"
+                  [class.bg-slate-50/50]="deleteStep(seg.id) === 0"
+                >
                   <div class="flex items-start justify-between gap-2">
-                    <div>
-                      <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Talk {{ i + 1 }} · {{ seg.status }}
-                      </div>
-                      <div class="font-semibold text-sm text-slate-900">{{ seg.title }}</div>
-                      <div class="text-xs text-slate-500">{{ seg.speakerName }}</div>
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Talk {{ i + 1 }} · {{ seg.status }}
+                      @if (seg.id === 'general') {
+                        <span class="ml-1 text-amber-700">(lobby)</span>
+                      }
                     </div>
                     <button
                       type="button"
@@ -195,6 +207,84 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                       <mat-icon class="text-sm">link</mat-icon>
                       Speaker Link
                     </button>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="sm:col-span-2">
+                      <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Talk title
+                      </label>
+                      <input
+                        type="text"
+                        [value]="draft(seg.id, 'title', seg.title)"
+                        (input)="setDraft(seg.id, 'title', $any($event.target).value)"
+                        class="w-full px-3 py-2 text-sm font-semibold border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Speaker name
+                      </label>
+                      <input
+                        type="text"
+                        [value]="draft(seg.id, 'speakerName', seg.speakerName)"
+                        (input)="setDraft(seg.id, 'speakerName', $any($event.target).value)"
+                        class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Speaker role / title
+                      </label>
+                      <input
+                        type="text"
+                        [value]="draft(seg.id, 'speakerRole', seg.speakerRole)"
+                        (input)="setDraft(seg.id, 'speakerRole', $any($event.target).value)"
+                        placeholder="e.g. Staff Engineer"
+                        class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Type
+                      </label>
+                      <select
+                        [value]="draft(seg.id, 'type', seg.type || 'TALK')"
+                        (change)="setDraft(seg.id, 'type', $any($event.target).value)"
+                        class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                      >
+                        <option value="TALK">Talk</option>
+                        <option value="PANEL">Panel</option>
+                        <option value="BREAK">Break</option>
+                        <option value="LOBBY">Lobby</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        Duration (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="480"
+                        [value]="draft(seg.id, 'durationMinutes', durationText(seg))"
+                        (input)="setDraft(seg.id, 'durationMinutes', $any($event.target).value)"
+                        class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                      Speaker bio
+                    </label>
+                    <textarea
+                      rows="2"
+                      [value]="draft(seg.id, 'speakerBio', seg.speakerBio)"
+                      (input)="setDraft(seg.id, 'speakerBio', $any($event.target).value)"
+                      placeholder="Short bio shown on the lobby…"
+                      class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                    ></textarea>
                   </div>
 
                   <div>
@@ -220,6 +310,19 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                       (input)="setDraft(seg.id, 'sessionDescription', $any($event.target).value)"
                       placeholder="What this talk covers for the audience…"
                       class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none"
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <label class="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                      Talk grounding (Gemini)
+                    </label>
+                    <textarea
+                      rows="3"
+                      [value]="draft(seg.id, 'groundingContext', seg.groundingContext || seg.contextData)"
+                      (input)="setDraft(seg.id, 'groundingContext', $any($event.target).value)"
+                      placeholder="Speaker notes / deck text for AI answers…"
+                      class="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:border-indigo-500 outline-none font-mono"
                     ></textarea>
                   </div>
 
@@ -262,15 +365,73 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
                     </div>
                   </div>
 
-                  <div class="flex justify-end pt-1">
+                  <!-- Double-confirm delete banner -->
+                  @if (deleteStep(seg.id) === 1) {
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <p class="text-xs text-amber-950 font-medium">
+                        Delete <strong>{{ seg.title }}</strong>? Click confirm again to proceed.
+                      </p>
+                      <div class="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          (click)="cancelDelete(seg.id)"
+                          class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-700 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          (click)="requestDelete(seg)"
+                          class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                        >
+                          Yes — confirm again
+                        </button>
+                      </div>
+                    </div>
+                  } @else if (deleteStep(seg.id) === 2) {
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg bg-red-50 border border-red-300">
+                      <p class="text-xs text-red-950 font-medium">
+                        Final confirmation: permanently remove this talk? Questions must be moved first if any exist.
+                      </p>
+                      <div class="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          (click)="cancelDelete(seg.id)"
+                          class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-700 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          (click)="confirmDelete(seg)"
+                          [disabled]="deletingSegId() === seg.id"
+                          class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white cursor-pointer disabled:opacity-50"
+                        >
+                          Delete permanently
+                        </button>
+                      </div>
+                    </div>
+                  }
+
+                  <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <button
                       type="button"
-                      (click)="saveSpeakerProfile(seg)"
+                      (click)="requestDelete(seg)"
+                      [disabled]="seg.id === 'general' || deletingSegId() === seg.id"
+                      class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      [title]="seg.id === 'general' ? 'Lobby segment cannot be deleted' : 'Delete this talk'"
+                    >
+                      <mat-icon class="text-sm">delete</mat-icon>
+                      Delete talk
+                    </button>
+                    <button
+                      type="button"
+                      (click)="saveTalk(seg)"
                       [disabled]="savingSegId() === seg.id"
                       class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-lg cursor-pointer disabled:opacity-50"
                     >
                       <mat-icon class="text-sm">save</mat-icon>
-                      Save speaker profile
+                      Save talk
                     </button>
                   </div>
                 </div>
@@ -282,19 +443,24 @@ type SpeakerDraftField = 'email' | 'sessionDescription' | 'speakerX' | 'speakerL
     </div>
   `,
 })
-export class SeriesManage implements OnInit {
+export class SeriesManage implements OnInit, OnDestroy {
   public qaService = inject(QaService);
   private fb = inject(FormBuilder);
 
   public showGeminiKey = signal(false);
   public isSavingSeries = signal(false);
+  public isAddingTalk = signal(false);
   public savingSegId = signal<string | null>(null);
-  /** Per-segment draft fields keyed by `${segId}:${field}` */
+  public deletingSegId = signal<string | null>(null);
+  /** 0 = idle, 1 = first confirm, 2 = final confirm */
+  public deleteSteps = signal<Record<string, 0 | 1 | 2>>({});
   public drafts = signal<Record<string, string>>({});
+  private deleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   public seriesForm = this.fb.group({
     title: ['', Validators.required],
     description: [''],
+    contextData: [''],
     geminiApiKey: [''],
   });
 
@@ -304,21 +470,35 @@ export class SeriesManage implements OnInit {
       this.seriesForm.patchValue({
         title: series.title || '',
         description: series.description || '',
+        contextData: series.contextData || series.seriesContextData || '',
         geminiApiKey: '',
       });
     }
   }
 
-  public draft(segId: string, field: SpeakerDraftField, fallback?: string | null): string {
+  ngOnDestroy(): void {
+    for (const t of this.deleteTimers.values()) clearTimeout(t);
+    this.deleteTimers.clear();
+  }
+
+  public draft(segId: string, field: TalkDraftField, fallback?: string | null): string {
     const key = `${segId}:${field}`;
     const map = this.drafts();
     if (key in map) return map[key];
     return fallback || '';
   }
 
-  public setDraft(segId: string, field: SpeakerDraftField, value: string): void {
+  public setDraft(segId: string, field: TalkDraftField, value: string): void {
     const key = `${segId}:${field}`;
-    this.drafts.update(m => ({ ...m, [key]: value }));
+    this.drafts.update((m) => ({ ...m, [key]: value }));
+  }
+
+  public durationText(seg: Segment): string {
+    return `${seg.durationMinutes || seg.scheduledDurationMinutes || 45}`;
+  }
+
+  public deleteStep(segId: string): 0 | 1 | 2 {
+    return this.deleteSteps()[segId] || 0;
   }
 
   public shareAudience(): void {
@@ -331,9 +511,15 @@ export class SeriesManage implements OnInit {
     if (this.seriesForm.invalid) return;
     this.isSavingSeries.set(true);
     const v = this.seriesForm.value;
-    const payload: { title: string; description?: string; geminiApiKey?: string } = {
+    const payload: {
+      title: string;
+      description?: string;
+      contextData?: string;
+      geminiApiKey?: string;
+    } = {
       title: v.title || '',
       description: v.description || '',
+      contextData: v.contextData || '',
     };
     const key = (v.geminiApiKey || '').trim();
     if (key) payload.geminiApiKey = key;
@@ -345,29 +531,122 @@ export class SeriesManage implements OnInit {
     }
   }
 
-  public async saveSpeakerProfile(seg: Segment): Promise<void> {
+  public async addTalk(): Promise<void> {
+    this.isAddingTalk.set(true);
+    const n = (this.qaService.segments()?.length || 0) + 1;
+    await this.qaService.addSegment({
+      title: `Talk ${n}`,
+      speakerName: 'Featured Speaker',
+      type: 'TALK',
+      durationMinutes: 45,
+    });
+    this.isAddingTalk.set(false);
+  }
+
+  public async saveTalk(seg: Segment): Promise<void> {
+    const title = this.draft(seg.id, 'title', seg.title).trim();
+    const speakerName = this.draft(seg.id, 'speakerName', seg.speakerName).trim();
+    const speakerRole = this.draft(seg.id, 'speakerRole', seg.speakerRole).trim();
+    const speakerBio = this.draft(seg.id, 'speakerBio', seg.speakerBio).trim();
     const email = this.draft(seg.id, 'email', seg.speakerEmail).trim().toLowerCase();
     const sessionDescription = this.draft(
       seg.id,
       'sessionDescription',
       seg.sessionDescription || seg.topicSummary
     ).trim();
+    const groundingContext = this.draft(
+      seg.id,
+      'groundingContext',
+      seg.groundingContext || seg.contextData
+    ).trim();
     const speakerX = this.draft(seg.id, 'speakerX', seg.speakerX).trim();
     const speakerLinkedIn = this.draft(seg.id, 'speakerLinkedIn', seg.speakerLinkedIn).trim();
     const speakerWebsite = this.draft(seg.id, 'speakerWebsite', seg.speakerWebsite).trim();
+    const type = (this.draft(seg.id, 'type', seg.type || 'TALK') || 'TALK') as SegmentType;
+    const durationRaw = Number(this.draft(seg.id, 'durationMinutes', this.durationText(seg)));
+    const durationMinutes = Number.isFinite(durationRaw) && durationRaw >= 5 ? Math.round(durationRaw) : 45;
+
+    if (!title || !speakerName) {
+      this.qaService.showToast('Talk title and speaker name are required');
+      return;
+    }
 
     this.savingSegId.set(seg.id);
     const ok = await this.qaService.updateSegment(seg.id, {
+      title,
+      speakerName,
+      speakerRole,
+      speakerBio,
       speakerEmail: email,
       sessionDescription,
       topicSummary: sessionDescription,
+      groundingContext,
+      contextData: groundingContext,
       speakerX,
       speakerLinkedIn,
       speakerWebsite,
+      type,
+      durationMinutes,
+      scheduledDurationMinutes: durationMinutes,
     });
     this.savingSegId.set(null);
     if (!ok) {
-      this.qaService.showToast(this.qaService.errorMessage() || 'Could not save speaker profile');
+      this.qaService.showToast(this.qaService.errorMessage() || 'Could not save talk');
     }
+  }
+
+  public requestDelete(seg: Segment): void {
+    if (seg.id === 'general') {
+      this.qaService.showToast('Cannot delete the series lobby segment');
+      return;
+    }
+    const current = this.deleteStep(seg.id);
+    const next = (current === 0 ? 1 : current === 1 ? 2 : 2) as 1 | 2;
+    this.deleteSteps.update((m) => ({ ...m, [seg.id]: next }));
+    this.armDeleteTimeout(seg.id);
+  }
+
+  public cancelDelete(segId: string): void {
+    this.clearDeleteTimeout(segId);
+    this.deleteSteps.update((m) => {
+      const next = { ...m };
+      delete next[segId];
+      return next;
+    });
+  }
+
+  public async confirmDelete(seg: Segment): Promise<void> {
+    if (this.deleteStep(seg.id) !== 2) {
+      this.requestDelete(seg);
+      return;
+    }
+    this.deletingSegId.set(seg.id);
+    const ok = await this.qaService.deleteSegment(seg.id);
+    this.deletingSegId.set(null);
+    this.cancelDelete(seg.id);
+    if (ok) {
+      // Drop drafts for removed segment
+      this.drafts.update((m) => {
+        const next: Record<string, string> = {};
+        for (const [k, v] of Object.entries(m)) {
+          if (!k.startsWith(`${seg.id}:`)) next[k] = v;
+        }
+        return next;
+      });
+    }
+  }
+
+  private armDeleteTimeout(segId: string): void {
+    this.clearDeleteTimeout(segId);
+    this.deleteTimers.set(
+      segId,
+      setTimeout(() => this.cancelDelete(segId), 12_000)
+    );
+  }
+
+  private clearDeleteTimeout(segId: string): void {
+    const t = this.deleteTimers.get(segId);
+    if (t) clearTimeout(t);
+    this.deleteTimers.delete(segId);
   }
 }

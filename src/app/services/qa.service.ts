@@ -1573,6 +1573,41 @@ export class QaService {
     }
   }
 
+  public async deleteSegment(segmentId: string): Promise<boolean> {
+    const code = this.currentSeries()?.joinCode;
+    if (!code) return false;
+    if (segmentId === 'general') {
+      this.showToast('Cannot delete the series lobby segment');
+      return false;
+    }
+
+    const token = this.userAuthToken();
+    try {
+      await this.api.deleteSegment(code, segmentId, token);
+      this.currentSeries.update((series) =>
+        series
+          ? {
+              ...series,
+              segments: (series.segments || []).filter((s) => s.id !== segmentId),
+              segmentIds: (series.segmentIds || []).filter((id) => id !== segmentId),
+            }
+          : null
+      );
+      this.showToast('Talk deleted from the series');
+      await this.refreshSessionData(true);
+      const series = this.currentSeries();
+      if (series) {
+        void this.firebaseService.syncSeriesToFirestore(series);
+      }
+      return true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error deleting talk';
+      this.errorMessage.set(msg);
+      this.showToast(msg);
+      return false;
+    }
+  }
+
   public async reorderSegments(segmentIds: string[]): Promise<boolean> {
     const code = this.currentSeries()?.joinCode;
     if (!code) return false;
