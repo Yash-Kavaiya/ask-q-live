@@ -4,13 +4,11 @@
 
 Product: [askqlive.com](https://askqlive.com) 
 
-![AskQlive live stage control room](assets/readme/hero-live-stage.png)
-
 *Host control room: live question feed, stage controls, and run-of-show in one surface.*
 
 <a href="https://www.producthunt.com/products/askqlive?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-askqlive" target="_blank" rel="noopener noreferrer"><img alt="AskQlive - Live Q&amp;A for multi-speaker events | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1261134&amp;theme=light&amp;t=1790486889912"></a>
 
----
+![AskQlive live stage control room](assets/readme/hero-live-stage.png)
 
 ## Why this exists
 
