@@ -1,19 +1,22 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { RouterLink, RouterOutlet } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { Header } from './components/header';
 import { ShareModal } from './components/share-modal';
+import { CookieBanner } from './components/cookie-banner';
 import { QaService } from './services/qa.service';
+import { CookieConsentService } from './services/cookie-consent.service';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-root',
-  imports: [MatIconModule, RouterOutlet, Header, ShareModal],
+  imports: [MatIconModule, RouterLink, RouterOutlet, Header, ShareModal, CookieBanner],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App {
   public qaService = inject(QaService);
+  public cookieConsent = inject(CookieConsentService);
 
   constructor() {
     if (typeof window !== 'undefined') {

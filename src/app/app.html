@@ -42,7 +42,30 @@
 
   <!-- Footer -->
   <footer class="mt-auto border-t border-slate-200 bg-white/80 py-5 text-center text-xs text-slate-500">
-    <div class="max-w-7xl mx-auto px-4 flex items-center justify-center flex-wrap gap-3">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col items-center justify-center gap-3">
+      <div class="flex items-center gap-3 flex-wrap justify-center">
+        <a
+          routerLink="/privacy"
+          class="text-slate-600 hover:text-indigo-700 font-medium transition-colors"
+        >
+          Privacy
+        </a>
+        <span class="text-slate-300" aria-hidden="true">·</span>
+        <a
+          routerLink="/cookies"
+          class="text-slate-600 hover:text-indigo-700 font-medium transition-colors"
+        >
+          Cookies
+        </a>
+        <span class="text-slate-300" aria-hidden="true">·</span>
+        <button
+          type="button"
+          (click)="cookieConsent.reopenBanner()"
+          class="text-slate-600 hover:text-indigo-700 font-medium transition-colors cursor-pointer bg-transparent border-0 p-0"
+        >
+          Cookie settings
+        </button>
+      </div>
       <div class="flex items-center gap-3 flex-wrap justify-center">
         <a
           href="https://buymeacoffee.com/yashkavaiye"
@@ -70,6 +93,8 @@
       </div>
     </div>
   </footer>
+
+  <app-cookie-banner />
 
 </div>
 

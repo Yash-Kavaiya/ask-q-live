@@ -10,6 +10,8 @@ import { WordCloudAnalytics } from './components/word-cloud-analytics';
 import { ModerationQueue } from './components/moderation-queue';
 import { GroundingContext } from './components/grounding-context';
 import { ExecutiveReport } from './components/executive-report';
+import { PrivacyPolicy } from './components/privacy-policy';
+import { CookiePolicy } from './components/cookie-policy';
 import { staffTabGuard, adminTabGuard, organizerGuard, sessionGuard } from './guards/session.guards';
 
 const sessionChildRoutes: Routes = [
@@ -28,6 +30,8 @@ export const routes: Routes = [
   { path: '', component: SessionJoin },
   { path: 'auth', component: AuthPage },
   { path: 'host', component: HostStudio, canActivate: [organizerGuard] },
+  { path: 'privacy', component: PrivacyPolicy },
+  { path: 'cookies', component: CookiePolicy },
   { path: 'session/:code', canActivateChild: [sessionGuard], children: sessionChildRoutes },
   { path: 'series/:code', canActivateChild: [sessionGuard], children: sessionChildRoutes },
   { path: '**', redirectTo: '' },
